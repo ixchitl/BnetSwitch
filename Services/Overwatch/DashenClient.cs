@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -47,7 +47,14 @@ public sealed class DashenClient
     // 同域请求最小间隔,避免突发把对方反爬(antiCrawlerConfig)打醒。全进程共享。
     private static readonly SemaphoreSlim _gate = new(1, 1);
     private static DateTime _lastReq = DateTime.MinValue;
+    /// <summary>
+    /// 相邻请求的最小间隔 + 随机抖动。
+    /// 【抖动是必须的】固定 250ms 一次不差,是最典型的脚本指纹 —— 真人点页面不可能这么匀。
+    /// 头可以照抓包逐字节对齐,但节奏对不上照样显眼。
+    /// </summary>
     private const int MinIntervalMs = 250;
+    private const int JitterMs = 400;
+    private static readonly Random _rng = new();
 
     private static string? _cachedDeviceId;
 
@@ -81,7 +88,9 @@ public sealed class DashenClient
         await _gate.WaitAsync();
         try
         {
-            var wait = MinIntervalMs - (int)(DateTime.UtcNow - _lastReq).TotalMilliseconds;
+            int jitter;
+            lock (_rng) jitter = _rng.Next(0, JitterMs);
+            var wait = MinIntervalMs + jitter - (int)(DateTime.UtcNow - _lastReq).TotalMilliseconds;
             if (wait > 0) await Task.Delay(wait);
             _lastReq = DateTime.UtcNow;
         }

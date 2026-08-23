@@ -16,7 +16,33 @@ namespace BnetSwitch.Services.Overwatch;
 public sealed class BlizzardCareerClient
 {
     private const string Base = "https://overwatch.blizzard.com";
-    private const string UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    private const string UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+    private const string SecChUa = "\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"";
+
+    /// <summary>
+    /// 相邻两次请求的最小间隔(毫秒)+ 随机抖动。批量刷段位时一个号一个请求,
+    /// 连着打过去在对方看来就是脚本 —— 拉开间隔并让它不规则,是最基本的礼貌,也最不容易被拦。
+    /// </summary>
+    private const int MinIntervalMs = 1200;
+    private const int JitterMs = 900;
+
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+    private static DateTime _lastReq = DateTime.MinValue;
+    private static readonly Random Rng = new();
+
+    private static async Task PaceAsync(CancellationToken ct)
+    {
+        await Gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            int jitter;
+            lock (Rng) jitter = Rng.Next(0, JitterMs);
+            var wait = MinIntervalMs + jitter - (int)(DateTime.UtcNow - _lastReq).TotalMilliseconds;
+            if (wait > 0) await Task.Delay(wait, ct).ConfigureAwait(false);
+            _lastReq = DateTime.UtcNow;
+        }
+        finally { Gate.Release(); }
+    }
 
     private static readonly HttpClient Http = new(new HttpClientHandler
     {
@@ -51,6 +77,7 @@ public sealed class BlizzardCareerClient
         {
             // 第一跳:直接按 名字-编号 请求。命中就顺带把整页 HTML 拿到手,不用再打一次。
             var url = $"{Base}/en-us/career/{TagToSlug(battleTag)}/";
+            await PaceAsync(ct).ConfigureAwait(false);
             using var req = New(url);
             using var resp = await Http.SendAsync(req, ct).ConfigureAwait(false);
             if (resp.IsSuccessStatusCode)
@@ -88,7 +115,8 @@ public sealed class BlizzardCareerClient
     public async Task<string?> SearchPermalinkAsync(string battleTag, CancellationToken ct = default)
     {
         var name = battleTag.Split('#')[0].Trim();
-        using var req = New($"{Base}/en-us/search/account-by-name/{Uri.EscapeDataString(name)}/");
+        await PaceAsync(ct).ConfigureAwait(false);
+        using var req = New($"{Base}/en-us/search/account-by-name/{Uri.EscapeDataString(name)}/", navigation: false);
         req.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
         using var resp = await Http.SendAsync(req, ct).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode) return null;
@@ -112,6 +140,7 @@ public sealed class BlizzardCareerClient
     /// <summary>GET /en-us/career/{permalink}/ —— 整页 HTML(~1.2MB)。</summary>
     public async Task<string?> FetchHtmlAsync(string permalink, CancellationToken ct = default)
     {
+        await PaceAsync(ct).ConfigureAwait(false);
         using var req = New($"{Base}/en-us/career/{permalink.Trim('/')}/");
         using var resp = await Http.SendAsync(req, ct).ConfigureAwait(false);
         return resp.IsSuccessStatusCode ? await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false) : null;
@@ -125,12 +154,31 @@ public sealed class BlizzardCareerClient
         _ => ex.Message,
     };
 
-    private static HttpRequestMessage New(string url)
+    /// <summary>
+    /// 构造请求。头要凑齐【真实浏览器会发的那一整套】—— 只发 UA + Accept 两三个头,
+    /// 在对方的风控看来和脚本没区别;sec-ch-ua / sec-fetch-* 这些缺一个都显眼。
+    /// </summary>
+    private static HttpRequestMessage New(string url, bool navigation = true)
     {
         var r = new HttpRequestMessage(HttpMethod.Get, url);
-        r.Headers.TryAddWithoutValidation("User-Agent", UA);
-        r.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-        r.Headers.TryAddWithoutValidation("Accept-Language", "en-US,en;q=0.9");
+        var h = r.Headers;
+        h.TryAddWithoutValidation("User-Agent", UA);
+        h.TryAddWithoutValidation("Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
+        h.TryAddWithoutValidation("Accept-Language", "en-US,en;q=0.9");
+        h.TryAddWithoutValidation("Accept-Encoding", "gzip, deflate, br");
+        h.TryAddWithoutValidation("sec-ch-ua", SecChUa);
+        h.TryAddWithoutValidation("sec-ch-ua-mobile", "?0");
+        h.TryAddWithoutValidation("sec-ch-ua-platform", "\"Windows\"");
+        h.TryAddWithoutValidation("Sec-Fetch-Dest", navigation ? "document" : "empty");
+        h.TryAddWithoutValidation("Sec-Fetch-Mode", navigation ? "navigate" : "cors");
+        h.TryAddWithoutValidation("Sec-Fetch-Site", navigation ? "none" : "same-origin");
+        if (navigation)
+        {
+            h.TryAddWithoutValidation("Sec-Fetch-User", "?1");
+            h.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
+        }
+        h.TryAddWithoutValidation("Cache-Control", "max-age=0");
         return r;
     }
 

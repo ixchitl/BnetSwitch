@@ -43,6 +43,7 @@ public partial class MainWindow : Window
             // 活跃上报必须排在更新提示前面:放后面的话,被强制更新挡下来直接退出的人一个都不会上报,
             // 等于统计里看不见强更劝退了多少人 —— 这个数以前是瞎的。
             Analytics.Ping();
+            SwitchLog.WriteHeader(_vm.AppVersion);
 
             if (!await UpdateGateAsync()) return;   // 只有 mandatory 版本会在这里拦住不放行
             StartShowListener();
@@ -120,11 +121,20 @@ public partial class MainWindow : Window
         if (sender is FrameworkElement { DataContext: AccountRow row }) OpenStatsFor(row);
     }
 
-    // 按区服分流:国服走网易大神(要扫码,roleId = account_id_lo);国际服/亚服走暴雪官方生涯页(免登录,吃 BattleTag)。
+    // 按区服分流,【严格对应,绝不交叉】:
+    //   国服 → 网易大神(要扫码,roleId = account_id_lo)
+    //   国际服/亚服 → 暴雪官方生涯页(免登录,吃 BattleTag)
+    // 区服读不出来时【什么都不查】—— 拿国服接口去查亚服号(或反过来)既拿不到数据,
+    // 又平白多一次会被对方风控记上的请求。
     private void OpenStatsFor(AccountRow row)
     {
-        if (row.IsCnRegion) Stats.StatsWindow.ShowFor(this, row.AccountId);
-        else Stats.CareerWindow.ShowFor(this, row.BattleTag);
+        if (row.IsCnRegion) { Stats.StatsWindow.ShowFor(this, row.AccountId); return; }
+        if (row.IsIntlRegion) { Stats.CareerWindow.ShowFor(this, row.BattleTag); return; }
+
+        MessageBox.Show(
+            $"读不出「{row.BattleTag}」属于哪个区服,没法确定该查国服还是国际服。\n\n" +
+            "在战网里登录一次这个账号,让它写进本地账号缓存之后再试。",
+            "无法确定区服", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     /// <summary>弹模态窗:主窗盖一层 dim 遮罩(对齐原型 .ov 的 mask)。</summary>

@@ -16,6 +16,18 @@ public sealed class GameStateManifest
 
     public DateTime CapturedUtc { get; set; }
 
+    /// <summary>抓快照时游戏的构建键(.build.info 里 Active 行的 Build Key)。
+    /// 游戏一打补丁这个就变了,快照随之过期 —— 记下来才能在日志里看出「还原的是旧版本」。</summary>
+    public string BuildKey { get; set; } = "";
+
+    /// <summary>
+    /// 抓快照时的游戏版本号(.build.info 的 Version 列,形如 2.24.0.0.152690)。
+    /// 【这是防止「切一次下几十 G」的关键】游戏打补丁后,旧快照里的 CASC 索引
+    /// 索引不到新增内容,而还原时又会把能索引到的新 .idx 移走 ——
+    /// 客户端就会认为一大堆内容缺失,触发整包重下。所以版本对不上时【整个不换】。
+    /// </summary>
+    public string Version { get; set; } = "";
+
     /// <summary>相对路径(game/… 或 agent/…)→ {size, sha256}。</summary>
     public Dictionary<string, GameStateFile> Files { get; set; } = new();
 }
@@ -136,6 +148,70 @@ public sealed class GameStateStore
         return null;
     }
 
+    /// <summary>读 .build.info 里 Active 行的某一列(按表头名取,不写死列号)。</summary>
+    private string? ReadBuildInfoField(string columnName)
+    {
+        try
+        {
+            if (GameRoot is null) return null;
+            var lines = File.ReadAllLines(Path.Combine(GameRoot, ".build.info"));
+            if (lines.Length < 2) return null;
+            var head = lines[0].Split('|');
+            var idx = -1;
+            for (var i = 0; i < head.Length; i++)
+                if (head[i].Split('!')[0].Trim().Equals(columnName, StringComparison.OrdinalIgnoreCase))
+                { idx = i; break; }
+            if (idx < 0) return null;
+
+            foreach (var line in lines.Skip(1))
+            {
+                var c = line.Split('|');
+                if (c.Length > idx && c.Length >= 2 && c[1].Trim() == "1") return c[idx].Trim();
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>当前游戏版本号(如 2.24.0.0.152690,国服会多个 NB2 后缀)。</summary>
+    public string? ReadCurrentVersion() => ReadBuildInfoField("Version");
+
+    /// <summary>
+    /// 两个版本号是不是同一个补丁级别。
+    ///
+    /// 【必须只比数字部分】国服(网易)的版本串带自己的后缀,形如 <c>2.24.0.3.152850NB2</c>,
+    /// 而国际服是 <c>2.24.0.3.152850</c> —— 同一个补丁在两个区服的字符串【天生不同】。
+    /// 直接整串比较的话永远判不等,于是每次跨区服切号都判定「游戏已更新」而跳过换文件,
+    /// 结果就是每次都让战网重下补丁,功能等于没有。
+    /// </summary>
+    public static bool SamePatchLevel(string a, string b)
+    {
+        static string Num(string v)
+        {
+            var i = 0;
+            while (i < v.Length && (char.IsDigit(v[i]) || v[i] == '.')) i++;
+            return v[..i].TrimEnd('.');
+        }
+        var na = Num(a); var nb = Num(b);
+        return na.Length > 0 && na == nb;
+    }
+
+    /// <summary>读当前激活行的构建键(.build.info 第 3 列),用来判断快照有没有因为游戏更新而过期。</summary>
+    public string? ReadCurrentBuildKey()
+    {
+        try
+        {
+            if (GameRoot is null) return null;
+            foreach (var line in File.ReadAllLines(Path.Combine(GameRoot, ".build.info")).Skip(1))
+            {
+                var c = line.Split('|');
+                if (c.Length >= 3 && c[1].Trim() == "1") return c[2].Trim();
+            }
+        }
+        catch { }
+        return null;
+    }
+
     /// <summary>读游戏当前处于哪个区服(.build.info 里 Active=1 的那一行的 Branch)。</summary>
     public string? ReadCurrentRegion()
     {
@@ -201,8 +277,13 @@ public sealed class GameStateStore
     /// 游戏状态是否自洽 —— 自动抓快照前必查,免得把「下了一半 / 正在修复」的坏状态存成基准,
     /// 那样下次还原反而会触发一次修复下载,比不做还糟。
     ///
-    /// 三个条件:上次打补丁成功(.patch.result == 0)、.build.info 里读得出激活区服、
-    /// 且 Agent 数据库里 prometheus 段的区服标签和它一致(不一致说明正处在换区服的中途)。
+    /// 两个条件:.build.info 里读得出激活区服,且 Agent 数据库里 prometheus 段的区服标签和它一致
+    /// (不一致说明正处在换区服的中途)。
+    ///
+    /// 【不要再拿 .patch.result 当健康门槛】游戏目录里的这个值可能长期是非 0(实测常驻 5011),
+    /// 游戏本身却完全正常。曾经要求它必须为 0,结果【从此再没存过一次快照】——
+    /// 快照永远停在旧版本,每次切过去都还原旧文件、触发几百兆补丁下载,
+    /// 表现为「保存功能像失效了一样」。
     /// </summary>
     public bool IsConsistent(out string? region)
     {
@@ -210,10 +291,6 @@ public sealed class GameStateStore
         if (GameRoot is null) return false;
         try
         {
-            var pr = Path.Combine(GameRoot, ".patch.result");
-            if (File.Exists(pr) && File.ReadAllText(pr).Trim() is { Length: > 0 } s && s != "0")
-                return false;
-
             region = ReadCurrentRegion();
             if (string.IsNullOrEmpty(region)) return false;
 
@@ -251,6 +328,8 @@ public sealed class GameStateStore
             Region = region,
             GameRoot = GameRoot,
             CapturedUtc = DateTime.UtcNow,
+            BuildKey = ReadCurrentBuildKey() ?? "",
+            Version = ReadCurrentVersion() ?? "",
         };
 
         long newBytes = 0;

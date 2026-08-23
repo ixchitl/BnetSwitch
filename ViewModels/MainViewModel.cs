@@ -39,8 +39,18 @@ public sealed class AccountRow : ObservableObject
     /// <summary>login_cache.environment,如 cn.actual.battlenet.com.cn / kr.actual.battle.net。占位行拿不到,留空。</summary>
     public string Environment { get; init; } = "";
 
-    /// <summary>国服?空环境(占位行)按国服算 —— 保持老行为,查战绩仍走现有国服窗。</summary>
-    public bool IsCnRegion => IsCn(Environment) || string.IsNullOrWhiteSpace(Environment);
+    /// <summary>
+    /// 明确是国服。【空环境不再当国服】—— 以前空环境按国服兜底,结果读不出区服的亚服号
+    /// 会被拿去查网易国服接口(反过来同理),这就是「用国服接口查亚服」的来源。
+    /// 现在读不出来就是读不出来,交给调用方决定,绝不猜。
+    /// </summary>
+    public bool IsCnRegion => IsCn(Environment);
+
+    /// <summary>明确是国际服/亚服(环境读得出来且不是国服)。</summary>
+    public bool IsIntlRegion => !string.IsNullOrWhiteSpace(Environment) && !IsCn(Environment);
+
+    /// <summary>区服是否已知。未知时不查战绩、不刷段位 —— 查错接口既拿不到数据又白白惊动风控。</summary>
+    public bool RegionKnown => !string.IsNullOrWhiteSpace(Environment);
 
     public static bool IsCn(string? environment)
         => environment?.Contains("battlenet.com.cn", StringComparison.OrdinalIgnoreCase) == true;
@@ -694,6 +704,7 @@ public sealed class MainViewModel : ObservableObject
         var hidden = new HashSet<long>(_settings.HiddenAccountIds);
         var targets = Accounts
             .Where(a => !hidden.Contains(a.AccountId) && a.BattleTag.Contains('#'))
+            .Where(a => a.RegionKnown)   // 区服读不出来就不查,绝不用另一边的接口去试
             .Select(a => new RankFetcher.Target(a.AccountId, a.BattleTag, a.IsCnRegion))
             .ToList();
 
@@ -771,12 +782,12 @@ public sealed class MainViewModel : ObservableObject
         // 切换是按 account_id 走的,这里按 id 去重,免得列表里出现两张一模一样的卡。
         var seen = new HashSet<long>();
 
-        // 区服(决定「查战绩」走国服网易还是国际服暴雪):同一个号两行时,只要有一行是国服就按国服算——
-        // 国服那边数据更全(有对局记录),而且国服号在暴雪侧查不到。
+        // 区服(决定「查战绩」走国服网易还是国际服暴雪)。
+        // 【不再偏向国服】以前同号多行时只要有一行是国服就按国服算,于是亚服号可能被拿去查网易接口。
+        // 现在按 login_cache 里第一条非空的环境如实取,查错接口既拿不到数据、又白白惊动对方风控。
         var envs = accounts.GroupBy(a => a.AccountId).ToDictionary(
             g => g.Key,
-            g => g.FirstOrDefault(a => AccountRow.IsCn(a.Environment))?.Environment
-                 ?? g.Select(a => a.Environment).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? "");
+            g => g.Select(a => a.Environment).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? "");
 
         foreach (var a in accounts)
         {
@@ -845,6 +856,7 @@ public sealed class MainViewModel : ObservableObject
         if (confirmed)
         {
             _pendingSwitchId = null;
+            SwitchLog.Write($"  登录核对: 成功({targetId})");
 
             // 只有【真的登进去了】才存令牌 —— 此刻注册表里那份必定是这个号刚用过的、活的。
             // 存错一次就会雪崩:坏值进快照 → 下次写回被拒 → 客户端又删一个槽,再也回不来。
@@ -866,7 +878,14 @@ public sealed class MainViewModel : ObservableObject
         _pendingSwitchId = null;
 
         // 战网压根没起来就别下结论(用户可能自己把它关了),下次再说
-        if (!ClientRunning) return;
+        if (!ClientRunning) { SwitchLog.Write("  登录核对: 未判定(战网没在运行)"); return; }
+
+        SwitchLog.Write($"  登录核对: 失败({targetId}) 原因="
+                        + (rejected ? "客户端日志显示令牌被服务端拒绝、免密已被清除" : "超时未确认"));
+        SwitchLog.Write($"  失败现场: 槽位={string.Join(",", _tokens.ReadAll().Keys.OrderBy(k => k))}"
+                        + $" live登录名={_profiles.ReadLiveLoginName() ?? "读不到"}");
+        foreach (var code in await Task.Run(() => LoginProbe.ClientErrorCodes(_pendingSwitchSince)))
+            SwitchLog.Write($"  客户端错误码: {code}");
 
         var target = Accounts.FirstOrDefault(a => a.AccountId == targetId);
         await Task.Run(() => _profiles.SetExpired(targetId, true));
@@ -1051,6 +1070,7 @@ public sealed class MainViewModel : ObservableObject
             if (!stopped)
                 throw new InvalidOperationException("战网未能完全退出,已中止保存。请从托盘右键『退出』战网后重试。");
 
+            SwitchLog.Write($"[存快照] {active.BattleTag}({active.AccountId})");
             StatusText = $"正在保存「{active.BattleTag}」的登录快照…";
             await Task.Run(() => _profiles.Save(active.AccountId, active.BattleTag));
             // 顺带把该号在 CachedData.db 的活跃指针(account_id/region)也存下,切换时写回,避免同邮箱 KR/CN 残留旧区域
@@ -1077,6 +1097,22 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     /// <summary>
+    /// 这份活跃指针 JSON 是不是属于指定账号。指针里带 account_id / account_region,
+    /// 存错或写错都会让客户端按【别的号的区服】去连,报「无法登录战网」这类连接错误。
+    /// 解析不出来就当【不属于】—— 拿不准时不写,是这块唯一安全的默认值。
+    /// </summary>
+    private static bool PointerBelongsTo(string pointerJson, long accountId)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(pointerJson);
+            return doc.RootElement.TryGetProperty("account_id", out var el)
+                   && el.TryGetInt64(out var id) && id == accountId;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
     /// 把目标号自己那份令牌写回它自己的槽。
     ///
     /// 国服(网易)和亚服(暴雪)是两家的服务器,同邮箱的两个号却共用一个本地令牌槽 ——
@@ -1094,15 +1130,19 @@ public sealed class MainViewModel : ObservableObject
             // 结果「从别的国服号切到亚服」时把写回整个挡掉了 —— 槽里还是别人的令牌,
             // 拿去敲暴雪必然被拒、客户端随即删槽。这正是「国服之间切都正常,一切到亚服就崩」的原因。
             var slot = _profiles.ReadOwnSlot(targetId);
-            if (slot is null) return;
+            if (slot is null) { SwitchLog.Write("  令牌写回: 跳过(还没学到这个号的槽)"); return; }
 
             var saved = _profiles.ReadTokens(targetId);
-            if (!saved.TryGetValue(slot, out var want)) return;
+            if (!saved.TryGetValue(slot, out var want))
+            { SwitchLog.Write($"  令牌写回: 跳过(快照里没有槽 {slot} 的令牌)"); return; }
 
             var current = _tokens.ReadAll();
-            if (current.TryGetValue(slot, out var now) && now.AsSpan().SequenceEqual(want)) return;
+            if (current.TryGetValue(slot, out var now) && now.AsSpan().SequenceEqual(want))
+            { SwitchLog.Write($"  令牌写回: 无需写(槽 {slot} 已经是它)"); return; }
 
-            _tokens.Write(slot, want);
+            var ok = _tokens.Write(slot, want);
+            SwitchLog.Write($"  令牌写回: 槽 {slot} {(ok ? "已写入" : "写入失败")}"
+                            + (current.ContainsKey(slot) ? "" : "(该槽原本不存在)"));
         }
         catch { /* 写回是增强,失败不该让整个切换失败 */ }
     }
@@ -1152,7 +1192,7 @@ public sealed class MainViewModel : ObservableObject
     {
         try
         {
-            if (_gameState.GameRoot is null) return null;
+            if (_gameState.GameRoot is null) { SwitchLog.Write("  游戏文件: 跳过(没找到安装目录)"); return null; }
 
             // 目标账号该用哪个区服的游戏:环境串第一段就是区服代码(cn/kr/us/eu)
             var want = AccountRow.IsCn(target.Environment) ? "CN"
@@ -1160,7 +1200,8 @@ public sealed class MainViewModel : ObservableObject
             if (string.IsNullOrEmpty(want)) return null;
 
             var now = await Task.Run(() => _gameState.ReadCurrentRegion());
-            if (string.Equals(now, want, StringComparison.OrdinalIgnoreCase)) return null;  // 同区服,一个字节都不碰
+            if (string.Equals(now, want, StringComparison.OrdinalIgnoreCase))
+            { SwitchLog.Write($"  游戏文件: 跳过(同区服 {now})"); return null; }
 
             // Agent 内存里存着 product.db,活着时读到的可能是半写状态、写进去又会被它覆盖回来。
             // 所以【存和还原都放在它退干净之后】。只有跨区服才等,普通切号不受影响。
@@ -1178,26 +1219,57 @@ public sealed class MainViewModel : ObservableObject
                 stopped = await Task.Run(() => BattleNetController.WaitUntilAgentStopped(attempts: 68));
             }
             if (!stopped)
-                return "游戏文件未切换:战网后台进程未退出";   // 切号照常进行
+            { SwitchLog.Write("  游戏文件: 跳过(Agent 未退出)"); return "游戏文件未切换:战网后台进程未退出"; }
 
             // 先把【要切走的这个区服】自动存一份:此刻客户端刚优雅退出,用户上一秒还在正常用,
             // 这是最可信的时机。状态不自洽(下了一半 / 正在修复)就跳过,宁可用旧快照。
             if (await Task.Run(() => _gameState.IsConsistent(out _)))
             {
                 StatusText = $"正在记录{RegionLabel(now ?? "")}的游戏状态…";
-                try { await Task.Run(() => _gameState.Capture()); }
-                catch { /* 存不上不影响切换,继续 */ }
+                try
+                {
+                    var (cr, cf, cb) = await Task.Run(() => _gameState.Capture());
+                    SwitchLog.Write($"  游戏状态已记录: {cr} {cf} 个文件,新增 {cb / 1048576} MB");
+                }
+                catch (Exception ce) { SwitchLog.Write($"  游戏状态记录失败: {ce.Message}"); }
+            }
+            else
+            {
+                SwitchLog.Write("  游戏状态: 未记录(状态判定为不自洽,可能正处在换区服/更新中途)");
+            }
+
+            // 【硬闸:版本对不上就整个不换】游戏打补丁后,旧快照里的 CASC 索引索引不到新内容,
+            // 而还原时又会把能用的新 .idx 移走 —— 客户端会认为大量内容缺失,触发【整包重下】
+            // (有用户报过一次切号下 40G)。这种情况下什么都不做,让战网按它自己的方式下补丁,
+            // 下完之后快照会自动更新,之后又能免下载了。
+            var wantMan = _gameState.ReadManifest(want);
+            var liveVer = await Task.Run(() => _gameState.ReadCurrentVersion());
+            if (wantMan is not null && !string.IsNullOrEmpty(wantMan.Version)
+                && !string.IsNullOrEmpty(liveVer)
+                && !GameStateStore.SamePatchLevel(wantMan.Version, liveVer))
+            {
+                SwitchLog.Write($"  游戏文件: 跳过(游戏已更新,快照版本 {wantMan.Version} ≠ 当前 {liveVer};" +
+                                "本次交给战网自己下补丁,避免误判内容缺失导致整包重下)");
+                return $"游戏已更新,{RegionLabel(want)}的文件这次由战网下载(下载完成后会自动重新记录)";
             }
 
             if (!_gameState.Has(want))
                 // 目标区服还没存过 —— 这次只能让战网自己下载,下完再切回来时就有了
-                return $"还没记录过{RegionLabel(want)}的游戏文件,这次仍需战网下载(下次就不用了)";
+            { SwitchLog.Write($"  游戏文件: 跳过(还没记录过 {want})"); return $"还没记录过{RegionLabel(want)}的游戏文件,这次仍需战网下载(下次就不用了)"; }
 
             StatusText = $"正在切换游戏文件到{RegionLabel(want)}(省去重新下载)…";
             var (restored, _, _) = await Task.Run(() => _gameState.Restore(want));
 
             // 结果要带回去让调用方拼进最终那句 —— 方法返回后 SwitchToAsync 会立刻把状态改成
             // 「正在启动战网…」,在这里写 StatusText 只能存在几毫秒,用户根本看不见。
+            // 把两边的构建键都记下来:游戏打过补丁后快照会过期,还原旧版本会触发一次下载。
+            // 日志里能直接看出「还原的是不是旧版本」,不用猜。
+            var man = _gameState.ReadManifest(want);
+            var liveBuild = await Task.Run(() => _gameState.ReadCurrentBuildKey());
+            SwitchLog.Write($"  游戏文件: {now} -> {want},写入 {restored} 个" +
+                            $"(快照构建={(string.IsNullOrEmpty(man?.BuildKey) ? "未记录" : man!.BuildKey[..8])}" +
+                            $" 当前构建={(liveBuild is null ? "读不到" : liveBuild[..8])}" +
+                            $" 快照时间={man?.CapturedUtc.ToLocalTime():MM-dd HH:mm})");
             return $"游戏文件已切到{RegionLabel(want)}({restored} 个文件,省去重新下载)";
         }
         catch (Exception ex)
@@ -1234,12 +1306,23 @@ public sealed class MainViewModel : ObservableObject
         Busy = true;
         try
         {
+            var fromRow = Accounts.FirstOrDefault(a => a.IsActive);
+            SwitchLog.Write($"[切号] {fromRow?.BattleTag ?? "未知"}({fromRow?.AccountId.ToString() ?? "-"}," +
+                            $"{AccountRow.Region(fromRow?.Environment ?? "")}) -> " +
+                            $"{target.BattleTag}({target.AccountId},{AccountRow.Region(target.Environment)})");
+            SwitchLog.Write($"  目标就绪: 快照={(target.HasProfile ? "有" : "无")}" +
+                            $" 令牌={(_profiles.ReadTokens(target.AccountId).Count > 0 ? "有" : "无")}" +
+                            $" 槽={_profiles.ReadOwnSlot(target.AccountId) ?? "未学到"}" +
+                            $" 指针={(_profiles.ReadPointer(target.AccountId) is null ? "无" : "有")}" +
+                            $" 标记过期={target.IsExpired}");
+
             // 先记下当前登录名(等会 Restore 会把 live 配置覆盖掉,那时就读不到了)——
             // 用来判断目标号是不是和它同邮箱,只有同邮箱才需要写回令牌。
             _loginNameBeforeSwitch = _profiles.ReadLiveLoginName();
 
             StatusText = "正在关闭战网…";
             var stopped = await Task.Run(() => _controller.GracefulQuit());
+            SwitchLog.Write($"  关闭战网: {(stopped ? "已退出" : "未能退出,中止")}");
             if (!stopped)
                 throw new InvalidOperationException("战网未能完全退出,已中止切换。请从托盘右键『退出』战网后重试。");
 
@@ -1261,11 +1344,11 @@ public sealed class MainViewModel : ObservableObject
             // 照存不误就会把坏值传下去,下次写回又被拒又删 —— 那正是之前雪崩的原因。
             // 只看【上一次我们启动客户端之后】的日志:再往前翻会把旧失败算进来,导致永远不敢存。
             var sessionStart = _pendingSwitchSince;
-            if (saveInto is long outgoing
-                && !await Task.Run(() => LoginProbe.SawTokenRejected(sessionStart)))
-            {
+            var outgoingOk = saveInto is long
+                             && !await Task.Run(() => LoginProbe.SawTokenRejected(sessionStart));
+            if (saveInto is long outgoing && outgoingOk)
                 await Task.Run(() => CaptureTokens(outgoing));
-            }
+            SwitchLog.Write($"  上一个号={saveInto?.ToString() ?? "判不出"} 令牌记录={(outgoingOk ? "已存" : "跳过(该会话登录失败或判不出)")}");
 
             if (saveInto is long cur && cur != target.AccountId)
             {
@@ -1274,7 +1357,11 @@ public sealed class MainViewModel : ObservableObject
                 {
                     StatusText = $"正在更新当前号「{curRow.BattleTag}」的快照…";
                     await Task.Run(() => _profiles.Save(cur, curRow.BattleTag));
-                    _profiles.SavePointer(cur, await Task.Run(() => _reader.ReadActivePointerJson()));
+                    var livePtr = await Task.Run(() => _reader.ReadActivePointerJson());
+                    if (livePtr is not null && PointerBelongsTo(livePtr, cur))
+                        _profiles.SavePointer(cur, livePtr);
+                    else
+                        SwitchLog.Write($"  活跃指针: 不存(当前指针不属于 {cur})");
                     curRow.SavedAtUtc = DateTime.UtcNow;
                     curRow.IsExpired = false;   // 它刚才还登着,令牌显然是好的
                 }
@@ -1282,16 +1369,29 @@ public sealed class MainViewModel : ObservableObject
 
             StatusText = $"正在还原「{target.BattleTag}」的账号文件…";
             await Task.Run(() => _profiles.Restore(target.AccountId));
+            SwitchLog.Write($"  还原文件: 完成,live 登录名={_profiles.ReadLiveLoginName() ?? "读不到"}");
             // 关键:把目标号的活跃指针写回 CachedData.db(%LOCALAPPDATA%,Restore 不覆盖这块)——
             // 否则同邮箱 KR/CN 互切时,残留的旧区域指针会和还原的配置打架,导致「无法登录战网」连接错。
+            // 写之前先校验这份指针确实属于目标号 —— 存指针那一刻若判错了当前号,就会把
+            // 【别的号的 account_id / region】写进 CachedData,客户端据此连错区服网关,
+            // 表现为「无法登录战网」这类连接错误。对不上就跳过:不写,总比写错强。
             var targetPtr = _profiles.ReadPointer(target.AccountId);
+            if (targetPtr is not null && !PointerBelongsTo(targetPtr, target.AccountId))
+            {
+                SwitchLog.Write($"  活跃指针: 跳过(存的指针不属于 {target.AccountId})");
+                targetPtr = null;
+            }
             if (targetPtr is not null)
+            {
                 await Task.Run(() => _reader.WriteActivePointer(targetPtr));
+                SwitchLog.Write("  活跃指针: 已写回");
+            }
 
             // 同邮箱的两个区服账号共用一个 UnifiedAuth 令牌槽(国服连网易、亚服连暴雪,是两家的服务器,
             // 拿错区服的令牌去敲对方必被拒:Tassadar token rejected by BGS → 客户端把槽删掉)。
             // 所以切过去之前,必须把【目标号自己那份】令牌写回槽。
             // 存令牌的时机已经改成「确认登录成功之后」,这里读到的必定是它真正用过的那份。
+            SwitchLog.Write($"  切换前槽位: {string.Join(",", _tokens.ReadAll().Keys.OrderBy(k => k))}");
             await Task.Run(() => RestoreOwnToken(target.AccountId));
 
             // 跨区服切换时把游戏文件也换过去,省掉每次一百多兆的重新下载。
@@ -1311,6 +1411,7 @@ public sealed class MainViewModel : ObservableObject
             _pendingSwitchSince = DateTime.UtcNow;   // 判定「登录成功」时只看这一刻之后客户端产生的证据
             _pendingSwitchUntil = DateTime.UtcNow.AddSeconds(SwitchVerifySeconds);
             _journal.Commit();   // 走到这里文件都换好了,现场可以丢
+            SwitchLog.Write("  切换完成,已启动战网");
             StatusText = $"已切换到「{target.BattleTag}」,战网正在启动,正在确认登录结果…"
                        + (gameNote is null ? "" : "  |  " + gameNote);
         }
@@ -1319,6 +1420,7 @@ public sealed class MainViewModel : ObservableObject
             // 出错就把切换前的现场原样放回去 —— 宁可这次没切成,也不能让人停在半新半旧的状态里
             var rolled = await Task.Run(() => _journal.Rollback(
                 _paths.RoamingDir, json => _reader.WriteActivePointer(json)));
+            SwitchLog.Write($"  切换失败: {ex.Message}{(rolled ? "(已回滚)" : "")}");
             StatusText = "切换失败:" + ex.Message + (rolled ? "(已恢复到切换前的状态)" : "");
             MessageBox.Show(
                 ex.Message + (rolled ? "\n\n已自动恢复到切换前的状态,当前账号不受影响。" : ""),
@@ -1355,7 +1457,11 @@ public sealed class MainViewModel : ObservableObject
                 {
                     StatusText = $"正在保存当前号「{curRow.BattleTag}」…";
                     await Task.Run(() => _profiles.Save(cur, curRow.BattleTag));
-                    _profiles.SavePointer(cur, await Task.Run(() => _reader.ReadActivePointerJson()));
+                    var livePtr = await Task.Run(() => _reader.ReadActivePointerJson());
+                    if (livePtr is not null && PointerBelongsTo(livePtr, cur))
+                        _profiles.SavePointer(cur, livePtr);
+                    else
+                        SwitchLog.Write($"  活跃指针: 不存(当前指针不属于 {cur})");
                     curRow.SavedAtUtc = DateTime.UtcNow;
                     curRow.IsExpired = false;
                 }

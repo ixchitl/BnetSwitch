@@ -126,6 +126,27 @@
                                     </TextBlock>
                                 </Border>
                             </StackPanel>
+                            <!-- 段位:当前账号这张卡以前漏了,只有右侧列表有,导致刷完段位这里什么都不显示,
+                                 看着像"没查当前号"(其实查了)。一个定位一个标签,和右侧一致。 -->
+                            <ItemsControl ItemsSource="{Binding CurrentAccount.RankRoles}" Margin="0,8,0,0">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border CornerRadius="4" Padding="5,2" Margin="0,4,5,0"
+                                                Background="{DynamicResource TagBg}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Image Source="{Binding Icon}" Width="14" Height="14" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding RoleCn, Mode=OneWay}" FontSize="11" Margin="0,0,4,0"
+                                                           Foreground="{DynamicResource Tx3}" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Text, Mode=OneWay}" FontSize="11"
+                                                           Foreground="{Binding Brush}" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                             <Border Height="1" Background="{DynamicResource Bd2}" Margin="0,14" />
                             <!-- 每次开工具都要用的动作放最上面:直接上当前这个号,不用自己再去找战网图标 -->
                             <Button Style="{StaticResource AccentButton}" Click="OnLaunchClient" Margin="0,0,0,8" IsEnabled="{Binding NotBusy}">

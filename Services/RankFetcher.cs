@@ -1,4 +1,4 @@
-using BnetSwitch.Services.Overwatch;
+﻿using BnetSwitch.Services.Overwatch;
 using BnetSwitch.Stats;
 using System.Windows;
 using System.Windows.Media;
@@ -26,6 +26,21 @@ public sealed class RankFetcher
     private static Brush? FindBrush(string key) =>
         Application.Current?.TryFindResource(key) as Brush;
 
+    private static readonly Random Rng = new();
+
+    /// <summary>
+    /// 批量刷段位时,【号与号之间】再拉开一段不规则的间隔。
+    /// 单个请求的节流只保证"不太快",但连续查十几个号仍然是一串规律流量 ——
+    /// 那正是最像爬虫的形态。这里 1.5~3.5 秒随机,一次刷十个号多花二三十秒,
+    /// 换的是不被对方风控盯上,值。
+    /// </summary>
+    private static Task PaceBetweenAccountsAsync(CancellationToken ct)
+    {
+        int ms;
+        lock (Rng) ms = Rng.Next(1500, 3500);
+        return Task.Delay(ms, ct);
+    }
+
     public async Task<Result> RefreshAsync(
         IReadOnlyList<Target> targets, RankStore store,
         Action<string>? log = null, CancellationToken ct = default)
@@ -52,9 +67,12 @@ public sealed class RankFetcher
             else
             {
                 var svc = new StatsService(client);
+                var first = true;
                 foreach (var t in cn)
                 {
                     ct.ThrowIfCancellationRequested();
+                    if (!first) await PaceBetweenAccountsAsync(ct);
+                    first = false;
                     log?.Invoke($"查询段位:{t.BattleTag}");
                     try
                     {
@@ -72,9 +90,12 @@ public sealed class RankFetcher
         if (intl.Count > 0)
         {
             var career = new CareerService();
+            var firstIntl = true;
             foreach (var t in intl)
             {
                 ct.ThrowIfCancellationRequested();
+                if (!firstIntl) await PaceBetweenAccountsAsync(ct);
+                firstIntl = false;
                 log?.Invoke($"查询段位:{t.BattleTag}");
                 try
                 {

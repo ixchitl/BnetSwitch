@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 
 namespace BnetSwitch.Services;
 
@@ -62,6 +62,38 @@ public static class LoginProbe
             return f.Exists && f.LastWriteTimeUtc >= sinceUtc.AddSeconds(-5);
         }
         catch { return false; }
+    }
+
+    /// <summary>
+    /// 本次启动之后客户端报过的错误码(BLZBNT…)。用户报障时直接写进我们自己的日志,
+    /// 省得再让他去翻战网的日志目录 —— 那一步大多数人做不到。
+    /// </summary>
+    public static IReadOnlyList<string> ClientErrorCodes(DateTime sinceUtc)
+    {
+        var codes = new List<string>();
+        try
+        {
+            var dir = new DirectoryInfo(LogsDir);
+            if (!dir.Exists) return codes;
+            foreach (var f in dir.GetFiles("battle.net-*.log"))
+            {
+                if (f.LastWriteTimeUtc < sinceUtc.AddSeconds(-5)) continue;
+                string text;
+                try
+                {
+                    using var fs = new FileStream(f.FullName, FileMode.Open, FileAccess.Read,
+                                                  FileShare.ReadWrite | FileShare.Delete);
+                    using var sr = new StreamReader(fs);
+                    text = sr.ReadToEnd();
+                }
+                catch { continue; }
+                foreach (System.Text.RegularExpressions.Match m in
+                         System.Text.RegularExpressions.Regex.Matches(text, @"BLZBNT[A-Z0-9]+"))
+                    if (!codes.Contains(m.Value)) codes.Add(m.Value);
+            }
+        }
+        catch { }
+        return codes;
     }
 
     /// <summary>

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 
@@ -233,6 +233,8 @@ public sealed class OwMappings
         ["Silver"] = ("白银", "Stats.TierSilver"),
         ["Gold"] = ("黄金", "Stats.TierGold"),
         ["Platinum"] = ("白金", "Stats.TierPlatinum"),
+        // 翡翠:OW2 后加的档位,排在白金和钻石之间
+        ["Emerald"] = ("翡翠", "Stats.TierEmerald"),
         ["Diamond"] = ("钻石", "Stats.TierDiamond"),
         ["Master"] = ("大师", "Stats.TierMaster"),
         ["Grandmaster"] = ("宗师", "Stats.TierGm"),
@@ -248,10 +250,10 @@ public sealed class OwMappings
     /// <summary>档位由低到高。RankTable 是字典没有顺序,比高低得靠这份显式排序。</summary>
     private static readonly string[] TierAsc =
     {
-        "Bronze", "Silver", "Gold", "Platinum", "Diamond", "Master", "Grandmaster", "Champion",
+        "Bronze", "Silver", "Gold", "Platinum", "Emerald", "Diamond", "Master", "Grandmaster", "Champion",
     };
 
-    /// <summary>档位高低序:青铜 0 → 英杰 7。认不出来返回 -1。</summary>
+    /// <summary>档位高低序:青铜 0 → 英杰 8(含翡翠)。认不出来返回 -1。</summary>
     public static int TierOrder(string? rankNameEn)
     {
         if (string.IsNullOrEmpty(rankNameEn)) return -1;

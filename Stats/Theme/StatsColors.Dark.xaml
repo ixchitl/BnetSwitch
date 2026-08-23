@@ -1,4 +1,4 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- 战绩模块 · 暗色主题(key 与亮色字典一一对应) -->
 
@@ -39,6 +39,7 @@
     <SolidColorBrush x:Key="Stats.TierSilver"   Color="#AEB6C4"/>
     <SolidColorBrush x:Key="Stats.TierGold"     Color="#E6C05A"/>
     <SolidColorBrush x:Key="Stats.TierPlatinum" Color="#7FC6D6"/>
+    <SolidColorBrush x:Key="Stats.TierEmerald"  Color="#43B58D"/>
     <SolidColorBrush x:Key="Stats.TierDiamond"  Color="#8DB4EE"/>
     <SolidColorBrush x:Key="Stats.TierMaster"   Color="#B49CE8"/>
     <SolidColorBrush x:Key="Stats.TierGm"       Color="#EAB661"/>
