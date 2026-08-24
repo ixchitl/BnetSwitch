@@ -763,6 +763,13 @@ public sealed class MainViewModel : ObservableObject
     private long? _pendingSwitchId;      // 刚切过去、还没确认登录结果的号
     private DateTime _pendingSwitchUntil;
 
+    /// <summary>
+    /// 切号写回令牌前,该槽的原占用令牌备份。共享槽(同网易通行证 / 同邮箱跨区)被兄弟号占着时,
+    /// 这次切号若被服务端拒 / 客户端删槽,登录核对失败就把兄弟号令牌还原回去,不再「切一次带走一片」。
+    /// slot=槽名;prev=原值(该槽原本不存在则 null)。切号成功即丢弃。
+    /// </summary>
+    private (string slot, byte[]? prev)? _pullSlotBackup;
+
     /// <summary>从磁盘读一次账号列表 + 当前号指针。</summary>
     private Task<(IReadOnlyList<BattleAccount> list, long? active)> ReadAllAsync() =>
         Task.Run(() =>
@@ -856,6 +863,7 @@ public sealed class MainViewModel : ObservableObject
         if (confirmed)
         {
             _pendingSwitchId = null;
+            _pullSlotBackup = null;   // 切号成功,槽备份用不上了,丢弃
             SwitchLog.Write($"  登录核对: 成功({targetId})");
 
             // 只有【真的登进去了】才存令牌 —— 此刻注册表里那份必定是这个号刚用过的、活的。
@@ -886,6 +894,27 @@ public sealed class MainViewModel : ObservableObject
                         + $" live登录名={_profiles.ReadLiveLoginName() ?? "读不到"}");
         foreach (var code in await Task.Run(() => LoginProbe.ClientErrorCodes(_pendingSwitchSince)))
             SwitchLog.Write($"  客户端错误码: {code}");
+
+        // 写回令牌前备份的槽原值还原回去 —— 这次切号把共享槽写坏/被客户端删了,
+        // 原来占这个槽的兄弟号(同网易通行证 / 同邮箱同槽)不该跟着遭殃。只在值确实变了时还原。
+        if (_pullSlotBackup is { } bk)
+        {
+            _pullSlotBackup = null;
+            if (bk.prev is { Length: > 0 })
+            {
+                var nowSlots = _tokens.ReadAll();
+                var cur = nowSlots.TryGetValue(bk.slot, out var v) ? v : null;
+                if (cur is null || !cur.AsSpan().SequenceEqual(bk.prev))
+                {
+                    var restored = await Task.Run(() => _tokens.Write(bk.slot, bk.prev));
+                    SwitchLog.Write($"  令牌回滚: 槽 {bk.slot} 还原原占用令牌 {(restored ? "已还原" : "还原失败")}");
+                }
+                else
+                    SwitchLog.Write($"  令牌回滚: 槽 {bk.slot} 无需还原(值未变)");
+            }
+            else
+                SwitchLog.Write($"  令牌回滚: 槽 {bk.slot} 原本为空,无需还原");
+        }
 
         var target = Accounts.FirstOrDefault(a => a.AccountId == targetId);
         await Task.Run(() => _profiles.SetExpired(targetId, true));
@@ -1123,6 +1152,7 @@ public sealed class MainViewModel : ObservableObject
     /// </summary>
     private void RestoreOwnToken(long targetId)
     {
+        _pullSlotBackup = null;   // 每次切号写回先清:防上一单没核对完的备份串到这次、误回滚无关槽
         try
         {
             // 【不要按「来源号是不是同邮箱」来判断】写回的是目标号【自己的槽】+【自己的令牌】,
@@ -1139,6 +1169,9 @@ public sealed class MainViewModel : ObservableObject
             var current = _tokens.ReadAll();
             if (current.TryGetValue(slot, out var now) && now.AsSpan().SequenceEqual(want))
             { SwitchLog.Write($"  令牌写回: 无需写(槽 {slot} 已经是它)"); return; }
+
+            // 覆盖前备份该槽的原占用令牌;这次切号若被拒/删槽,VerifySwitchAsync 会用它还原兄弟号令牌。
+            _pullSlotBackup = (slot, current.TryGetValue(slot, out var prevBlob) ? prevBlob : null);
 
             var ok = _tokens.Write(slot, want);
             SwitchLog.Write($"  令牌写回: 槽 {slot} {(ok ? "已写入" : "写入失败")}"
