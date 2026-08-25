@@ -414,7 +414,7 @@ public sealed class GameStateStore
                 if (keep.Contains(rel)) continue;
                 var d = Path.Combine(qdir, rel.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(d)!);
-                File.Move(f, d, overwrite: true);
+                RetryIo(() => File.Move(f, d, overwrite: true));
                 quarantined++;
             }
         }
@@ -445,11 +445,29 @@ public sealed class GameStateStore
                     continue;
                 }
             }
-            File.Copy(pool, dst, overwrite: true);
+            RetryIo(() => File.Copy(pool, dst, overwrite: true));
             restored++;
         }
 
         return (restored, skipped, quarantined);
+    }
+
+    /// <summary>
+    /// 切号那一刻战网/Agent 刚退出,个别 .idx / 内容文件的句柄可能还没释放干净,
+    /// File.Move/Copy 会抛「正被占用 / 拒绝访问」。以前这一抛,整个换文件就中止了(还静默无日志)
+    /// → 战网把配错区服的文件当成缺失,触发重下几十 G。这里对这类【瞬时占用】重试几次
+    /// (每次退避一点),绝大多数一两秒内句柄就放开了;真放不开才抛出去,由上层记日志。
+    /// </summary>
+    private static void RetryIo(Action op, int attempts = 6)
+    {
+        for (int i = 0; ; i++)
+        {
+            try { op(); return; }
+            catch (Exception e) when ((e is IOException || e is UnauthorizedAccessException) && i < attempts)
+            {
+                System.Threading.Thread.Sleep(200);
+            }
+        }
     }
 
     private string? ResolveTarget(string rel)

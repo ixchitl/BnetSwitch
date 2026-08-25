@@ -39,10 +39,23 @@ public sealed class AccountReader
             using var conn = new SqliteConnection(cs);
             conn.Open();
 
+            // connected_environments 是账号真实归属(判国服/国际服优先看它)。老版本战网的库可能没这列,
+            // 直接 SELECT 会抛异常、连带整张账号列表读不出;先探一下列在不在,不在就退回旧查询。
+            var hasConnected = false;
+            using (var chk = conn.CreateCommand())
+            {
+                chk.CommandText = "PRAGMA table_info(login_cache)";
+                using var cr = chk.ExecuteReader();
+                while (cr.Read())
+                    if (string.Equals(cr.GetString(1), "connected_environments", StringComparison.OrdinalIgnoreCase))
+                    { hasConnected = true; break; }
+            }
+
             using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText =
-                    "SELECT name, environment, battle_tag, account_id_lo FROM login_cache";
+                cmd.CommandText = hasConnected
+                    ? "SELECT name, environment, battle_tag, account_id_lo, connected_environments FROM login_cache"
+                    : "SELECT name, environment, battle_tag, account_id_lo FROM login_cache";
                 using var r = cmd.ExecuteReader();
                 while (r.Read())
                 {
@@ -52,6 +65,7 @@ public sealed class AccountReader
                         Environment = r.IsDBNull(1) ? "" : r.GetString(1),
                         BattleTag = r.IsDBNull(2) ? "" : r.GetString(2),
                         AccountId = r.IsDBNull(3) ? 0 : r.GetInt64(3),
+                        ConnectedEnvironments = hasConnected && !r.IsDBNull(4) ? r.GetString(4) : "",
                     });
                 }
             }

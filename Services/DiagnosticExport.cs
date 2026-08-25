@@ -75,6 +75,10 @@ public static class DiagnosticExport
         return fallback;
     }
 
+    /// <summary>环境串取首段(cn/kr/us/…),空则「?」。诊断里对齐用。</summary>
+    private static string ShortEnv(string env)
+        => string.IsNullOrWhiteSpace(env) ? "?" : env.Split('.')[0].ToLowerInvariant();
+
     private static string BuildSummary(string appVersion, string root)
     {
         var sb = new StringBuilder();
@@ -128,6 +132,20 @@ public static class DiagnosticExport
             }
         }
         else sb.AppendLine("  (没有 accounts 目录)");
+        sb.AppendLine();
+
+        // login_cache 原始行 —— 排查「区服显示错(国服号显示成亚服)」必需。
+        // environment 是末次登录端点、跨区服切号可能被写串;connected_environments 才是账号真实归属。
+        // 这里【无任何凭据】,只有账号 id / 区服 / BattleTag。
+        sb.AppendLine("== 登录缓存 login_cache(判区服用,无凭据)==");
+        try
+        {
+            var rows = new AccountReader(new BattleNetPaths()).ReadAccounts(out _);
+            if (rows.Count == 0) sb.AppendLine("  (空)");
+            foreach (var a in rows.OrderBy(a => a.AccountId))
+                sb.AppendLine($"  {a.AccountId,-12} env={ShortEnv(a.Environment),-6} connected=[{a.ConnectedEnvironments}]  {a.BattleTag}");
+        }
+        catch (Exception e) { sb.AppendLine("  读取失败: " + e.Message); }
         sb.AppendLine();
 
         // 游戏状态快照

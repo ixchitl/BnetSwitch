@@ -782,6 +782,42 @@ public sealed class MainViewModel : ObservableObject
     /// 把读到的账号列表 + 当前号指针套用到界面。RefreshAsync / 自动轮询 / 保存前 共用,
     /// 保证「刚登录、列表里从没出现过的号」(换区登录最常见)也能立刻成为当前号。
     /// </summary>
+    /// <summary>
+    /// 判定一个号该显示成哪个区服。优先信 connected_environments(账号真实归属:国服号=CN,国际服号=EU/KR/US/…)
+    /// —— environment 是【末次登录端点】,跨区服切号有可能把国服号写成 kr,这正是「国服号显示成亚服」的根因。
+    /// connected 读不出(空)或自相矛盾时,退回原逻辑:如实取第一条非空 environment,绝不猜。
+    /// </summary>
+    private static string ResolveEnvironment(IEnumerable<BattleAccount> rows)
+    {
+        var list = rows.ToList();
+        var connected = list
+            .SelectMany(a => (a.ConnectedEnvironments ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(s => s.ToUpperInvariant())
+            .ToHashSet();
+
+        bool hasCn = connected.Contains("CN");
+        bool hasIntl = connected.Overlaps(new[] { "KR", "US", "EU", "TW" });
+
+        // 明确只连国服:无论 environment 被写成什么,都按国服显示
+        if (hasCn && !hasIntl)
+            return list.Select(a => a.Environment).FirstOrDefault(AccountRow.IsCn)
+                   ?? "cn.actual.battlenet.com.cn";
+
+        // 明确是国际服:取一条非国服的 environment;整条都被写成国服时,按 connected 兜一个具体区服
+        if (hasIntl && !hasCn)
+        {
+            var intlEnv = list.Select(a => a.Environment)
+                .FirstOrDefault(e => !string.IsNullOrWhiteSpace(e) && !AccountRow.IsCn(e));
+            if (!string.IsNullOrWhiteSpace(intlEnv)) return intlEnv;
+            var code = new[] { "KR", "US", "EU", "TW" }.First(connected.Contains).ToLowerInvariant();
+            return $"{code}.actual.battle.net";
+        }
+
+        // connected 读不出 / 既有 CN 又有国际服:退回原逻辑,如实取第一条非空 environment
+        return list.Select(a => a.Environment).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? "";
+    }
+
     private void ApplyAccounts(IReadOnlyList<BattleAccount> accounts, long? activeId)
     {
         Accounts.Clear();
@@ -789,12 +825,12 @@ public sealed class MainViewModel : ObservableObject
         // 切换是按 account_id 走的,这里按 id 去重,免得列表里出现两张一模一样的卡。
         var seen = new HashSet<long>();
 
-        // 区服(决定「查战绩」走国服网易还是国际服暴雪)。
-        // 【不再偏向国服】以前同号多行时只要有一行是国服就按国服算,于是亚服号可能被拿去查网易接口。
-        // 现在按 login_cache 里第一条非空的环境如实取,查错接口既拿不到数据、又白白惊动对方风控。
+        // 区服(决定「查战绩」走国服网易还是国际服暴雪、以及左侧列表的区服标)。
+        // 优先信 connected_environments(账号真实归属),environment 只是末次登录端点、跨区服切号会被写串 ——
+        // 「国服号显示成亚服」就是 environment 被写成 kr 造成的。详见 ResolveEnvironment。
         var envs = accounts.GroupBy(a => a.AccountId).ToDictionary(
             g => g.Key,
-            g => g.Select(a => a.Environment).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? "");
+            g => ResolveEnvironment(g));
 
         foreach (var a in accounts)
         {
@@ -1308,6 +1344,9 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             // 换游戏文件只是省下载的增强,失败了不该让切号本身失败 —— 大不了让战网自己更新一次。
+            // 【必须记日志】以前这里静默吞异常,结果"换文件没成功、战网要重下几十G"在日志里完全看不到,
+            // 没法诊断。现在把异常类型+消息写进 switch.log。
+            SwitchLog.Write($"  游戏文件: 未切换(出错 {ex.GetType().Name}:{ex.Message})—— 战网可能需要重新下载");
             return "游戏文件未切换(" + ex.Message + "),战网可能需要重新下载";
         }
     }
