@@ -32,8 +32,9 @@ fi
 win_targeting=(-p:EnableWindowsTargeting=true)
 
 usage() {
-    # 打印文件头部注释块(第 2~12 行)作为用法说明
-    sed -n '2,12p' "$0" | sed 's/^#//'
+    # 打印文件头部注释块(第 2 行起,到第一行非注释为止)作为用法说明,
+    # 不硬编码结束行号,增删头部注释无需同步改这里
+    awk 'NR < 2 {next} /^#/ {sub(/^#/, ""); print; next} {exit}' "$0"
 }
 
 cmd_build() {

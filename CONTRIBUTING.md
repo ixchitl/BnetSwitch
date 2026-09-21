@@ -49,8 +49,9 @@ WSL/Linux 用仓库根目录的 `build.sh`（约定与退出码见脚本头部�
 
 ```text
 App.xaml(.cs)              入口:单实例互斥、全局异常、全部命令行参数分发(见下方分级表)
-Views/                     主窗口与各对话框(MainWindow、SettingsWindow、ContactWindow、
-                           CloseChoiceWindow、LoginNewWindow、NoteWindow、SnapshotConfirmWindow…)
+Views/                     主窗口与全部对话框:MainWindow、SettingsWindow、ContactWindow、
+                           CloseChoiceWindow、DeleteConfirmWindow、LoginNewWindow、NoteWindow、
+                           SnapshotConfirmWindow
 ViewModels/MainViewModel   UI 侧编排:账号列表刷新/保存快照/切换/删除/刷新段位
 Models/BattleAccount       账号数据模型
 Services/                  全部非 UI 逻辑:
@@ -69,9 +70,11 @@ Services/                  全部非 UI 逻辑:
   Avatar / ThemeManager / TrayMenuFactory / LinkOpener / StartupService
                            本地头像配色 / 亮暗主题 / 托盘菜单 / 外部链接(仅反馈与项目主页) / 开机自启(HKCU Run)
   Overwatch/               战绩查询(仅用户主动触发):DashenAuth/DashenClient(国服大神扫码授权)、
-                           BlizzardCareerClient/CareerParser(国际服生涯)、OwMappings/OwEnNames/OwImageCache(映射与图片缓存)
-Stats/                     战绩窗口族(StatsWindow、CareerWindow、BillboardWindow、QrLoginDialog…)
-                           与 StatsService/CareerService;Stats/Theme 为战绩窗独立样式
+                           BlizzardCareerClient/CareerParser(国际服生涯)、CareerProbe/OwProbe(CLI 探针实现)、
+                           OwMappings/OwEnNames/OwImageCache(映射与图片缓存)
+Stats/                     战绩窗口族:StatsWindow、CareerWindow、BillboardWindow、FriendsWindow、
+                           HeroDetailWindow、MatchDetailWindow、QrLoginDialog,
+                           与 StatsService/CareerService/StatsModels;Stats/Theme 为战绩窗独立样式
 Themes/                    主窗口亮/暗资源字典(Palette.Light/Dark、Controls、Icons)
 validation/                合成数据兼容性检查脚本(Linux 可跑,mktemp + XDG 隔离)
 docs/                      验证报告等文档
