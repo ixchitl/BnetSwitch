@@ -13,6 +13,13 @@ installer/out/
 .idea/
 .claude/
 
+# ===== Agent 运行时文件(本地工具自动管理,含运行时身份/平台信息,不入库;
+#       仓库级 Agent 说明在 CONTRIBUTING.md)=====
+CLAUDE.md
+AGENTS.md
+.multica/
+.opencode/
+
 # ===== 运行时诊断 / 临时文件 =====
 *.log
 selftest.txt

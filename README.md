@@ -38,20 +38,32 @@
 
 ## 编译 / 运行
 
-需要 [.NET 8 SDK](https://dotnet.microsoft.com/download)。
+需要 [.NET 8 SDK](https://dotnet.microsoft.com/download)。产物是 WPF 程序,**只能在 Windows 上运行**。
+
+Windows 下:
 
 ```bash
 dotnet build
-bin/Debug/net8.0-windows/BnetSwitch.exe
+bin\Debug\net8.0-windows\BnetSwitch.exe
 ```
 
-**发布(多文件)+ 打安装包(推荐分发方式):**
+WSL/Linux 交叉编译(需显式开启 Windows targeting):
 
 ```bash
-dotnet publish -c Release -r win-x64 --self-contained false -o publish
+./build.sh build      # 一键构建/验证入口,详见 CONTRIBUTING.md
+# 等价于: dotnet build -p:EnableWindowsTargeting=true
+```
+
+**发布(多文件)+ 打安装包(推荐分发方式,Windows):**
+
+```bash
+powershell -ExecutionPolicy Bypass -File build.ps1
+# 或手动: dotnet publish -c Release -r win-x64 --self-contained false -o publish
 # 产物:publish\ 目录(BnetSwitch.exe + 依赖 dll,框架依赖版,约 2~3MB)
 # 再用 installer\app.iss(Inno Setup)把整个 publish\ 打成安装包分发
 ```
+
+开发约定、模块导航与一键验证脚本见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 命令行 / 排错
 
@@ -68,19 +80,7 @@ BnetSwitch.exe --addaccount     # 回登录页(不登出)以登新号 → addacc
 
 ## 项目结构
 
-```
-App.xaml(.cs)                    入口、全局异常、命令行 --selftest/--save/--switch/--addaccount
-MainWindow.xaml(.cs)             主界面
-Models/BattleAccount.cs          账号数据模型
-Services/
-  BattleNetPaths.cs              解析战网目录 + 自动定位 Battle.net.exe
-  AccountReader.cs               从 CachedData.db 读账号列表与当前登录号
-  AppDataStore.cs                ★ %APPDATA%\Battle.net 文件的存/还原/删 + 新建账号清指针(切换核心)
-  BattleNetController.cs         ★ 关闭(EnumWindows+WM_ENDSESSION,不强杀)/ 启动战网
-  AppSettings.cs                 本工具设置
-ViewModels/MainViewModel.cs      刷新 / 登录新号 / 保存 / 切换 / 删除 的编排
-（RegistryStore.cs 为早期错误的注册表方案,已弃用不引用)
-```
+模块导航(各目录职责、切换核心文件、命令行参数风险分级)见 [CONTRIBUTING.md](CONTRIBUTING.md#模块导航)。
 
 ---
 
