@@ -64,14 +64,13 @@
                                   Checked="OnKillAgent" Unchecked="OnKillAgent" />
                     <Border Height="1" Background="{DynamicResource Bd2}" VerticalAlignment="Bottom" />
                 </Grid>
-                <!-- 版本更新 -->
+                <!-- 当前版本 -->
                 <Grid MinHeight="50">
                     <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="版本更新" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="12.5" />
+                        <TextBlock Text="当前版本" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="12.5" />
                         <TextBlock x:Name="VerText" Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,0" />
                     </StackPanel>
-                    <Button x:Name="BtnUpd" Style="{StaticResource GhostButton}" Height="30" Padding="12,0" HorizontalAlignment="Right"
-                            VerticalAlignment="Center" Click="OnCheckUpdate" Content="检测更新" FontSize="12" />
+
                     <Border Height="1" Background="{DynamicResource Bd2}" VerticalAlignment="Bottom" />
                 </Grid>
                 <!-- exe 路径 -->

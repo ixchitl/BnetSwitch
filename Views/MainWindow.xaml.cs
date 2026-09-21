@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
@@ -40,66 +40,14 @@ public partial class MainWindow : Window
 
         Loaded += async (_, _) =>
         {
-            // 活跃上报必须排在更新提示前面:放后面的话,被强制更新挡下来直接退出的人一个都不会上报,
-            // 等于统计里看不见强更劝退了多少人 —— 这个数以前是瞎的。
-            Analytics.Ping();
             SwitchLog.WriteHeader(_vm.AppVersion);
 
-            if (!await UpdateGateAsync()) return;   // 只有 mandatory 版本会在这里拦住不放行
             StartShowListener();
             await _vm.RefreshAsync();
             _watchTimer.Tick += async (_, _) => await _vm.PollAccountsAsync();
             _watchTimer.Start();
-            await _vm.InitLicenseAsync();
-            await _vm.LoadServerAdsAsync();   // 服务器广告覆盖本地,再决定开屏
-            if (ShouldStartHidden())
-                HideToTray();
-            else
-                ShowSplashIfAny();
+            if (ShouldStartHidden()) HideToTray();
         };
-    }
-
-    /// <summary>
-    /// 开启时检测更新。强制版本挡在主界面外(必须更新或退出);非强制版本每个只弹一次提示,
-    /// 关掉后只在标题栏留个小标。返回 true=放行进主界面。
-    /// </summary>
-    private async Task<bool> UpdateGateAsync()
-    {
-        DimOverlay.Visibility = Visibility.Visible;   // 检查期间盖住主界面
-        UpdateInfo? info = null;
-        try { info = await UpdateService.CheckAsync(_vm.Settings.UpdateUrl, _vm.AppVersion); }
-        catch { info = null; }
-
-        if (info is not { HasUpdate: true })
-        {
-            DimOverlay.Visibility = Visibility.Collapsed;
-            return true;   // 没更新 / 检查失败(连不上)→ 放行,别把人锁在外面
-        }
-
-        if (info.Mandatory)
-        {
-            new UpdateWindow(info) { Owner = this }.ShowDialog();   // 更新成功会退出装新版;退出会关掉 app
-            Application.Current.Shutdown();   // 兜底再退一次,防 Alt+F4 绕过
-            return false;
-        }
-
-        // 非强制:小标常驻,提示窗每个版本只打断一次
-        _vm.PendingUpdate = info;
-        if (_vm.Settings.UpdateNoticeShownFor != info.LatestVersion)
-        {
-            _vm.Settings.UpdateNoticeShownFor = info.LatestVersion;
-            _vm.Settings.Save();
-            new UpdateWindow(info) { Owner = this }.ShowDialog();
-        }
-
-        DimOverlay.Visibility = Visibility.Collapsed;
-        return true;
-    }
-
-    /// <summary>点标题栏那个「新版 x.y.z」小标:重新打开更新说明窗。</summary>
-    private void OnOpenUpdate(object sender, RoutedEventArgs e)
-    {
-        if (_vm.PendingUpdate is { } info) ShowDimmed(new UpdateWindow(info));
     }
 
     // ===== 标题栏 =====
@@ -108,7 +56,7 @@ public partial class MainWindow : Window
         WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
     private void OnOpenSettings(object sender, RoutedEventArgs e) => ShowDimmed(new SettingsWindow(_vm));
-    private void OnContact(object sender, RoutedEventArgs e) => ShowDimmed(new ContactWindow(_vm.QQGroupUrl, _vm.GithubUrl));
+    private void OnContact(object sender, RoutedEventArgs e) => ShowDimmed(new ContactWindow());
 
     // 查战绩:当前登录号(身份卡按钮)/ 指定号(账号卡悬停按钮)。
     private void OnOpenStats(object sender, RoutedEventArgs e)
@@ -253,40 +201,6 @@ public partial class MainWindow : Window
     /// <summary>顶部「刷新段位」:唯一会为段位联网的入口(启动和轮询都不查)。</summary>
     private async void OnRefreshRanks(object sender, RoutedEventArgs e) => await _vm.RefreshRanksAsync();
 
-    private void OnBottomBannerClick(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: RotatingAdVM b })
-        {
-            BnetSwitch.Services.Analytics.Click("bottom");
-            _vm.OpenAdUrl(b.Url);
-        }
-    }
-
-    private void OnRemoveAd(object sender, MouseButtonEventArgs e)
-    {
-        e.Handled = true;
-        OpenActivate();
-    }
-
-    private void OpenActivate()
-    {
-        var dlg = new ActivateWindow(_vm.License, _vm.ApiBaseUrl, _vm.SponsorUrl);
-        if (ShowDimmed(dlg) == true && dlg.ActivatedCode is not null)
-            _vm.ApplyActivation(dlg.ActivatedCode);
-    }
-
-    // ===== 开屏广告 =====
-    private void ShowSplashIfAny()
-    {
-        var slot = _vm.SplashAd;
-        if (slot is { Enabled: true } && slot.HasContent && !_vm.AdFree)
-        {
-            var w = new SplashAdWindow(slot, _vm.SplashImagePath);
-            ShowDimmed(w);
-            if (w.RemoveAdsRequested) OpenActivate();
-        }
-    }
-
     // ===== 托盘 / 关闭 / 单实例 =====
     private bool ShouldStartHidden() =>
         Environment.GetCommandLineArgs().Any(a => string.Equals(a, "--tray", StringComparison.OrdinalIgnoreCase))
@@ -394,15 +308,6 @@ public partial class MainWindow : Window
     }
 
     private void ExitApp() { _reallyExit = true; Close(); }
-
-    /// <summary>为自动更新彻底退出:释放托盘、真正关闭(不进托盘),好让安装包替换被占用的文件。</summary>
-    public void ForceExitForUpdate()
-    {
-        _reallyExit = true;
-        _watchTimer.Stop();
-        DisposeTray();
-        Application.Current.Shutdown();
-    }
 
     private void DisposeTray()
     {

@@ -1,47 +1,7 @@
-﻿using System.IO;
+using System.IO;
 using System.Text.Json;
 
 namespace BnetSwitch.Services;
-
-/// <summary>一个广告位的配置。</summary>
-public sealed class AdSlot
-{
-    /// <summary>广告文字(没设图片时显示)。</summary>
-    public string Text { get; set; } = "";
-
-    /// <summary>点击打开的链接(推广/联盟/打赏)。</summary>
-    public string Url { get; set; } = "";
-
-    /// <summary>广告图片 URL(可选,http/https;设了就显示图片,可随时在服务器换图)。</summary>
-    public string ImageUrl { get; set; } = "";
-
-    /// <summary>是否启用该广告位。</summary>
-    public bool Enabled { get; set; }
-
-    public bool HasContent => !string.IsNullOrWhiteSpace(Text) || !string.IsNullOrWhiteSpace(ImageUrl);
-}
-
-/// <summary>轮播广告里的一条(文字或图片 + 跳转链接)。</summary>
-public sealed class AdItem
-{
-    public string Text { get; set; } = "";
-    public string Url { get; set; } = "";
-    public string ImageUrl { get; set; } = "";
-
-    public bool HasContent => !string.IsNullOrWhiteSpace(Text) || !string.IsNullOrWhiteSpace(ImageUrl);
-}
-
-/// <summary>底部轮播广告位:多条广告每隔几秒轮换一条。</summary>
-public sealed class RotatingAd
-{
-    public bool Enabled { get; set; }
-
-    /// <summary>轮换间隔(秒)。</summary>
-    public int IntervalSec { get; set; } = 6;
-
-    /// <summary>广告条目(轮换显示)。</summary>
-    public List<AdItem> Items { get; set; } = new();
-}
 
 /// <summary>本工具自身的设置,存 %LOCALAPPDATA%\BnetSwitch\settings.json。</summary>
 public sealed class AppSettings
@@ -93,49 +53,6 @@ public sealed class AppSettings
 
     /// <summary>置顶的账号 id。只影响排序,在各自分组内排到最前。</summary>
     public List<long> PinnedAccountIds { get; set; } = new();
-
-    /// <summary>「联系开发者」弹窗:QQ 交流群链接。</summary>
-    public string QQGroupUrl { get; set; } = "https://qm.qq.com/q/3SeTEXIIGI";
-
-    /// <summary>「联系开发者」弹窗:GitHub 开源仓库(GPLv3 源码 + 安装包发行,自 v2.0.3 起合并到这一个仓)。</summary>
-    public string GithubUrl { get; set; } = "https://github.com/qiyh99/BnetSwitch";
-
-    /// <summary>版本更新检测接口:返回 {version,notes,url} 的 JSON 地址。留空则「检测更新」只显示当前版本。</summary>
-    public string UpdateUrl { get; set; } = "https://api.qiyonghan.icu/api/version";
-
-    /// <summary>
-    /// 已经弹过「有新版」提示的版本号。非强制的新版每个只打断用户一次,
-    /// 之后就只在标题栏挂个小标 —— 每次启动都弹,和强制更新没差多少。
-    /// </summary>
-    public string? UpdateNoticeShownFor { get; set; }
-
-    // ---- 广告位(改 settings.json 即可,不用重编译;正式由后端 /api/ads 下发)----
-
-    /// <summary>开屏弹窗广告(启动弹一次,可关)。</summary>
-    public AdSlot SplashAd { get; set; } = new()
-    { Text = "开屏广告位 —— 配 settings.json 的 SplashAd(Text/Url/ImageUrl)并把 Enabled 设 true", Enabled = false };
-
-    /// <summary>底部轮播横幅广告(多条轮换)。</summary>
-    public RotatingAd BottomAd { get; set; } = new()
-    {
-        Enabled = true,
-        IntervalSec = 6,
-        Items = { new AdItem { Text = "💡 广告位招租 —— 后端 /api/admin/ads 配置底部轮播" } }
-    };
-
-    // ---- 去广告 / 激活码 ----
-
-    /// <summary>激活服务器地址(你的后端)。留空则去广告/广告下发/更新不可用。</summary>
-    public string ApiBaseUrl { get; set; } = "https://api.qiyonghan.icu";
-
-    /// <summary>「赞助获取激活码」打开的页面(你的发卡平台/收款码说明页)。</summary>
-    public string SponsorUrl { get; set; } = "";
-
-    /// <summary>已激活的激活码(本地缓存,启动时会向后端复核)。</summary>
-    public string? LicenseCode { get; set; }
-
-    /// <summary>本地缓存的去广告状态(离线时沿用,避免误伤已付费用户)。</summary>
-    public bool AdFreeCached { get; set; }
 
     private static string FilePath
     {

@@ -1,4 +1,4 @@
-﻿<Window x:Class="BnetSwitch.ContactWindow"
+<Window x:Class="BnetSwitch.ContactWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ctrl="clr-namespace:BnetSwitch.Controls"
@@ -24,17 +24,17 @@
             <StackPanel Margin="15,12,15,15">
                 <TextBlock Text="有问题、建议或想交流,欢迎来找我 👇" Foreground="{DynamicResource Tx2}" FontSize="12.5" Margin="0,0,0,10" />
 
-                <!-- QQ 交流群 -->
-                <Border x:Name="QQRow" CornerRadius="10" BorderBrush="{DynamicResource BtnBd}" BorderThickness="1"
-                        Background="{DynamicResource Card}" Padding="11,10" Margin="0,0,0,8" Cursor="Hand" MouseLeftButtonUp="OnQQ">
+                <!-- fork 问题反馈 -->
+                <Border x:Name="FeedbackRow" CornerRadius="10" BorderBrush="{DynamicResource BtnBd}" BorderThickness="1"
+                        Background="{DynamicResource Card}" Padding="11,10" Margin="0,0,0,8" Cursor="Hand" MouseLeftButtonUp="OnFeedback">
                     <DockPanel>
                         <Border DockPanel.Dock="Left" Width="36" Height="36" CornerRadius="10" Background="{DynamicResource AccSoft}" Margin="0,0,11,0">
                             <ctrl:IconView Geometry="{StaticResource GeoChat}" Stroke="{DynamicResource Acc}" Thickness="2" IconSize="19" />
                         </Border>
                         <ctrl:IconView DockPanel.Dock="Right" Geometry="{StaticResource GeoExt}" Stroke="{DynamicResource Tx3}" Thickness="2" IconSize="15" VerticalAlignment="Center" />
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="加入 QQ 交流群" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="13" />
-                            <TextBlock Text="反馈问题 · 交流 · 抢先拿新版" Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,0"
+                            <TextBlock Text="GitHub 问题反馈" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="13" />
+                            <TextBlock Text="在 ixchitl/BnetSwitch 提交问题或建议" Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,0"
                                        TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </DockPanel>
@@ -50,7 +50,7 @@
                         <ctrl:IconView DockPanel.Dock="Right" Geometry="{StaticResource GeoExt}" Stroke="{DynamicResource Tx3}" Thickness="2" IconSize="15" VerticalAlignment="Center" />
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="GitHub 项目主页 · 下载最新版" Foreground="{DynamicResource Tx1}" FontWeight="Medium" FontSize="13" />
-                            <TextBlock Text="历史版本 · 点个 Star ⭐ 支持作者" Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,0"
+                            <TextBlock Text="本地开源版 · 原作者 qiyh99 · GPLv3" Foreground="{DynamicResource Tx3}" FontSize="11" Margin="0,2,0,0"
                                        TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </DockPanel>

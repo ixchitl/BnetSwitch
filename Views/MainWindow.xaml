@@ -1,4 +1,4 @@
-﻿<Window x:Class="BnetSwitch.MainWindow"
+<Window x:Class="BnetSwitch.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ctrl="clr-namespace:BnetSwitch.Controls"
@@ -30,16 +30,7 @@
                            Foreground="{DynamicResource Tx1}" FontSize="13" />
 
                 <!-- 非强制的新版只在这挂个小标,不拦人。强制版本压根走不到主界面,不会出现在这。 -->
-                <Button DockPanel.Dock="Left" Style="{StaticResource TitleIconButton}" Width="Auto" Padding="8,0" Margin="12,0,0,0"
-                        Click="OnOpenUpdate" Visibility="{Binding UpdateBadgeVisibility}"
-                        WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="查看更新说明并升级">
-                    <Border Background="{DynamicResource AccSoft}" CornerRadius="9" Padding="8,2">
-                        <StackPanel Orientation="Horizontal">
-                            <ctrl:IconView Geometry="{StaticResource GeoDownload}" Stroke="{DynamicResource Acc}" Thickness="2" IconSize="12" Margin="0,0,4,0" />
-                            <TextBlock Text="{Binding UpdateBadgeText}" Foreground="{DynamicResource Acc}" FontSize="11.5" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Border>
-                </Button>
+
 
                 <Button DockPanel.Dock="Right" Style="{StaticResource TitleIconButton}" Click="OnCloseClick"
                         WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="关闭">
@@ -258,7 +249,7 @@
                     <DockPanel Grid.Row="1" Margin="2,2,2,10">
                         <TextBlock DockPanel.Dock="Left" Text="可秒切" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Tx1}" VerticalAlignment="Center" />
                         <TextBlock DockPanel.Dock="Left" Text="{Binding ReadyCountText}" FontSize="12" Foreground="{DynamicResource Tx3}" VerticalAlignment="Center" Margin="8,0,0,0" />
-                        <Button DockPanel.Dock="Right" Style="{StaticResource TitleIconButton}" Click="OnRefreshRanks" IsEnabled="{Binding NotBusy}"
+                        <Button DockPanel.Dock="Right" Style="{StaticResource TitleIconButton}" Click="OnRefreshRanks" IsEnabled="{Binding CanRefreshRanks}"
                                 ToolTip="刷新段位(要联网查询;国服号需要扫码登录网易大神)">
                             <ctrl:IconView Geometry="{StaticResource GeoChart}" Stroke="{DynamicResource Tx3}" Thickness="2" IconSize="15" />
                         </Button>
@@ -494,26 +485,9 @@
         <!-- ===== 底栏 ===== -->
         <Border Grid.Row="2" Background="{DynamicResource Win}" BorderBrush="{DynamicResource Bd2}" BorderThickness="0,1,0,0">
             <Grid Margin="16,10">
-                <StackPanel Orientation="Horizontal" DataContext="{Binding BottomBanner}"
-                            Visibility="{Binding BannerVisibility}" Cursor="Hand" Background="Transparent"
-                            MouseLeftButtonUp="OnBottomBannerClick">
-                    <Border Background="{DynamicResource TagBg}" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
-                        <TextBlock Text="AD" Foreground="{DynamicResource TagTx}" FontSize="10" />
-                    </Border>
-                    <Image Source="{Binding ImageUrl}" Visibility="{Binding ImageVisibility}" MaxHeight="28"
-                           Stretch="Uniform" Margin="8,0,0,0" VerticalAlignment="Center"
-                           RenderOptions.BitmapScalingMode="HighQuality" />
-                    <TextBlock Text="{Binding Text}" Visibility="{Binding TextVisibility}" Foreground="{DynamicResource TagTx}"
-                               FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"
-                               TextTrimming="CharacterEllipsis" MaxWidth="620" />
-                    <TextBlock Text="{Binding CountLabel}" Visibility="{Binding CountVisibility}" Foreground="{DynamicResource Tx3}"
-                               FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0" />
-                </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <TextBlock Text="{Binding TotalCountText}" Foreground="{DynamicResource Tx3}" FontSize="12" VerticalAlignment="Center" />
-                    <TextBlock Text="去广告" Foreground="{DynamicResource Acc}" FontSize="12" VerticalAlignment="Center" Margin="12,0,0,0"
-                               Cursor="Hand" MouseLeftButtonUp="OnRemoveAd"
-                               Visibility="{Binding RemoveAdVisibility}" />
+
                 </StackPanel>
             </Grid>
         </Border>

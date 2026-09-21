@@ -26,9 +26,6 @@ public sealed class StatsService
         // 自己 queryCard 的 customerToken 里解出 sign,之后给任意 bnetId 构造 customerToken
         var ownCard = Parse(await _client.QueryCardRawAsync(own.RoleId, _ownBigdata, "1"));
         _sign = DashenClient.ExtractSign(FindStr(ownCard, "customerToken"));
-        // 后台把全部英雄/地图缩略图预取到本地(不阻塞)
-        _ = OwImageCache.PrefetchAsync(_maps.AllHeroIconUrls(), 128);
-        _ = OwImageCache.PrefetchAsync(_maps.AllMapIconUrls(), 160);
         _ready = true;
     }
 

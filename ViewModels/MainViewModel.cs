@@ -1,10 +1,8 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
-using System.Net.Http;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -280,7 +278,6 @@ public sealed class MainViewModel : ObservableObject
     private readonly AppDataStore _profiles;
     private readonly BattleNetController _controller;
     private readonly AppSettings _settings;
-    private readonly LicenseService _license;
     private readonly RankStore _ranks;
     private readonly TokenStore _tokens = new();
     private readonly GameStateStore _gameState = new();
@@ -319,8 +316,7 @@ public sealed class MainViewModel : ObservableObject
     private string _rankStatusText = "";
     /// <summary>
     /// 「刷新段位」的进度/结果,显示在列表表头右侧。
-    /// 不复用 <see cref="StatusText"/> 是因为它在主界面上根本没有落点(底栏只放了计数和广告位),
-    /// 而刷段位要跑十几秒还会灰掉左边的按钮,不给反馈用户只会以为卡死了。
+    /// 查询可能等待网络,单独显示进度,不覆盖本地切号的状态。
     /// </summary>
     public string RankStatusText
     {
@@ -331,8 +327,16 @@ public sealed class MainViewModel : ObservableObject
     public Visibility RankStatusVisibility => _rankStatusText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
     private bool _busy;
-    public bool Busy { get => _busy; set { Set(ref _busy, value); Raise(nameof(NotBusy)); Raise(nameof(BusyVisibility)); } }
+    public bool Busy { get => _busy; set { Set(ref _busy, value); Raise(nameof(NotBusy)); Raise(nameof(CanRefreshRanks)); Raise(nameof(BusyVisibility)); } }
     public bool NotBusy => !_busy;
+
+    private bool _refreshingRanks;
+    public bool RefreshingRanks
+    {
+        get => _refreshingRanks;
+        private set { Set(ref _refreshingRanks, value); Raise(nameof(CanRefreshRanks)); }
+    }
+    public bool CanRefreshRanks => !Busy && !RefreshingRanks;
 
     /// <summary>
     /// 忙碌遮罩。跨区服切号要等战网后台进程退出(十几秒),没有反馈的话看着就像卡死了;
@@ -352,170 +356,8 @@ public sealed class MainViewModel : ObservableObject
 
     public string AppVersion => "v" + (Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0");
 
-    // ---- 广告位(底部轮播横幅 + 开屏)----
-    public RotatingAdVM BottomBanner { get; }
-    public AdSlot SplashAd => _settings.SplashAd;
-
-    private bool _adFree;
-    public bool AdFree
-    {
-        get => _adFree;
-        set
-        {
-            Set(ref _adFree, value);
-            Raise(nameof(RemoveAdVisibility));
-            BottomBanner.RefreshVisibility();
-        }
-    }
-
-    /// <summary>状态栏那个「去广告」入口。付过钱的人右下角就该是干净的,不留任何字。</summary>
-    public Visibility RemoveAdVisibility => _adFree ? Visibility.Collapsed : Visibility.Visible;
-
-    public void OpenAdUrl(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) { StatusText = "这个广告位还没配链接(settings.json)。"; return; }
-        OpenUrl(url);
-    }
-
-    // ---- 设置 / 去广告 / 激活码 / 开发者 ----
     public AppSettings Settings => _settings;
-    public LicenseService License => _license;
-    public string ApiBaseUrl => _settings.ApiBaseUrl;
-    public string SponsorUrl => _settings.SponsorUrl;
-    public string QQGroupUrl => _settings.QQGroupUrl;
-    public string GithubUrl => _settings.GithubUrl;
-
-    // ---- 新版提示 ----
-    private UpdateInfo? _pendingUpdate;
-    /// <summary>检测到但还没装的新版(仅非强制版本会走到这)。标题栏那个小标靠它显示。</summary>
-    public UpdateInfo? PendingUpdate
-    {
-        get => _pendingUpdate;
-        set
-        {
-            Set(ref _pendingUpdate, value);
-            Raise(nameof(UpdateBadgeVisibility));
-            Raise(nameof(UpdateBadgeText));
-        }
-    }
-
-    public Visibility UpdateBadgeVisibility => _pendingUpdate is null ? Visibility.Collapsed : Visibility.Visible;
-    public string UpdateBadgeText => _pendingUpdate is null ? "" : "新版 " + _pendingUpdate.LatestVersion;
-
-    public void ApplyActivation(string code)
-    {
-        _settings.LicenseCode = code;
-        _settings.AdFreeCached = true;
-        _settings.Save();
-        AdFree = true;
-        StatusText = "已去广告,感谢支持 ❤";
-    }
-
-    public async Task InitLicenseAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_settings.LicenseCode)) return;
-        AdFree = _settings.AdFreeCached;
-        var ok = await _license.VerifyAsync(_settings.ApiBaseUrl, _settings.LicenseCode!);
-        if (ok is null) return;
-        AdFree = ok.Value;
-        _settings.AdFreeCached = ok.Value;
-        if (!ok.Value) _settings.LicenseCode = null;
-        _settings.Save();
-    }
-
-    /// <summary>从服务器拉广告配置覆盖本地(可后台随时换广告);拉不到就沿用本地缓存(离线兜底)。</summary>
-    public async Task LoadServerAdsAsync()
-    {
-        if (!string.IsNullOrWhiteSpace(_settings.ApiBaseUrl))
-        {
-            try
-            {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(6) };
-                var json = await http.GetStringAsync(_settings.ApiBaseUrl.TrimEnd('/') + "/api/ads");
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-                ApplyServerSlot(root, "splash", _settings.SplashAd);
-                ApplyServerRotating(root, "bottom", _settings.BottomAd);
-                ApplyServerConfig(root);   // 赞助页/QQ群/GitHub 也从服务器下发
-                _settings.Save();   // 缓存到本地,下次离线也有
-
-                Raise(nameof(SplashAd));
-                BottomBanner.Refresh();
-            }
-            catch { /* 离线:沿用本地缓存的广告 */ }
-        }
-        await PreloadSplashImageAsync();   // 预下载开屏图到本地缓存,弹窗时秒显(不再现下)
-    }
-
-    /// <summary>开屏图的本地缓存路径(启动时预下载)。开屏弹窗从这读,瞬间显示。</summary>
-    public string? SplashImagePath { get; private set; }
-
-    private async Task PreloadSplashImageAsync()
-    {
-        SplashImagePath = null;
-        var url = _settings.SplashAd?.ImageUrl;
-        if (string.IsNullOrWhiteSpace(url)) return;
-        try
-        {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BnetSwitch", "cache");
-            Directory.CreateDirectory(dir);
-            var name = Convert.ToHexString(
-                System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(url)));
-            var file = Path.Combine(dir, "splash_" + name + ".img");
-            if (!File.Exists(file))
-            {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
-                await File.WriteAllBytesAsync(file, await http.GetByteArrayAsync(url));
-            }
-            SplashImagePath = file;
-        }
-        catch { SplashImagePath = null; }
-    }
-
-    private static void ApplyServerSlot(JsonElement root, string key, AdSlot slot)
-    {
-        if (!root.TryGetProperty(key, out var o) || o.ValueKind != JsonValueKind.Object) return;
-        if (o.TryGetProperty("enabled", out var e)) slot.Enabled = e.ValueKind == JsonValueKind.True;
-        if (o.TryGetProperty("text", out var t)) slot.Text = t.GetString() ?? "";
-        if (o.TryGetProperty("url", out var u)) slot.Url = u.GetString() ?? "";
-        if (o.TryGetProperty("imageUrl", out var i)) slot.ImageUrl = i.GetString() ?? "";
-    }
-
-    /// <summary>解析后端下发的链接配置 config:{sponsorUrl,qqGroup,githubUrl}。非空才覆盖,空则保留客户端内置默认。</summary>
-    private void ApplyServerConfig(JsonElement root)
-    {
-        if (!root.TryGetProperty("config", out var c) || c.ValueKind != JsonValueKind.Object) return;
-        string? Get(string k) => c.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
-        var sponsor = Get("sponsorUrl"); if (!string.IsNullOrWhiteSpace(sponsor)) _settings.SponsorUrl = sponsor!;
-        var qq = Get("qqGroup"); if (!string.IsNullOrWhiteSpace(qq)) _settings.QQGroupUrl = qq!;
-        var gh = Get("githubUrl"); if (!string.IsNullOrWhiteSpace(gh)) _settings.GithubUrl = gh!;
-    }
-
-    /// <summary>解析后端下发的轮播广告:{enabled, intervalSec, items:[{text,url,imageUrl}]}。</summary>
-    private static void ApplyServerRotating(JsonElement root, string key, RotatingAd ad)
-    {
-        if (!root.TryGetProperty(key, out var o) || o.ValueKind != JsonValueKind.Object) return;
-        if (o.TryGetProperty("enabled", out var e)) ad.Enabled = e.ValueKind == JsonValueKind.True;
-        if (o.TryGetProperty("intervalSec", out var iv) && iv.TryGetInt32(out var sec) && sec > 0) ad.IntervalSec = sec;
-        if (o.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
-        {
-            var list = new List<AdItem>();
-            foreach (var it in items.EnumerateArray())
-            {
-                if (it.ValueKind != JsonValueKind.Object) continue;
-                list.Add(new AdItem
-                {
-                    Text = it.TryGetProperty("text", out var t) ? t.GetString() ?? "" : "",
-                    Url = it.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "",
-                    ImageUrl = it.TryGetProperty("imageUrl", out var im) ? im.GetString() ?? "" : "",
-                });
-            }
-            ad.Items = list;
-        }
-    }
-
-    private void OpenUrl(string url) => LinkOpener.Open(url);
+    public const string GithubUrl = "https://github.com/ixchitl/BnetSwitch";
 
     public MainViewModel()
     {
@@ -527,17 +369,9 @@ public sealed class MainViewModel : ObservableObject
         _reader = new AccountReader(_paths);
         _profiles = new AppDataStore(_paths);
         _controller = new BattleNetController(_paths);
-        _license = new LicenseService();
         _ranks = RankStore.Load();   // 纯读本地文件,不联网
 
-        // 先认本地缓存的授权状态。InitLicenseAsync 排在更新检查和账号刷新后面,
-        // 等它跑完状态栏已经晃过一次「去广告」了 —— 付了钱的人不该看到这一下。
-        _adFree = _settings.AdFreeCached;
 
-        BottomBanner = new RotatingAdVM(_settings.BottomAd, () => _adFree);
-
-        // 埋点初始化(设备ID/后端地址/版本);启动活跃上报在 LoadServerAdsAsync 里发一次。
-        Analytics.Init(_settings.ApiBaseUrl, _license.MachineId, AppVersion);
     }
 
     // ---- 搜索(名字 / 备注 / 段位,模糊)----
@@ -700,7 +534,7 @@ public sealed class MainViewModel : ObservableObject
     /// </summary>
     public async Task RefreshRanksAsync()
     {
-        if (Busy) return;
+        if (!CanRefreshRanks) return;
         var hidden = new HashSet<long>(_settings.HiddenAccountIds);
         var targets = Accounts
             .Where(a => !hidden.Contains(a.AccountId) && a.BattleTag.Contains('#'))
@@ -708,9 +542,9 @@ public sealed class MainViewModel : ObservableObject
             .Select(a => new RankFetcher.Target(a.AccountId, a.BattleTag, a.IsCnRegion))
             .ToList();
 
-        if (targets.Count == 0) { StatusText = RankStatusText = "没有可查段位的账号。"; AutoClearRankStatus(); return; }
+        if (targets.Count == 0) { RankStatusText = "没有可查段位的账号。"; AutoClearRankStatus(); return; }
 
-        Busy = true;
+        RefreshingRanks = true;
         try
         {
             // 进度回调是从 RankFetcher 内部的 await 之后打出来的,那儿不一定还在 UI 线程,
@@ -718,8 +552,8 @@ public sealed class MainViewModel : ObservableObject
             var disp = Application.Current?.Dispatcher;
             void Log(string msg)
             {
-                if (disp is null || disp.CheckAccess()) { StatusText = msg; RankStatusText = msg; }
-                else disp.Invoke(() => { StatusText = msg; RankStatusText = msg; });
+                if (disp is null || disp.CheckAccess()) { RankStatusText = msg; }
+                else disp.Invoke(() => { RankStatusText = msg; });
             }
 
             var fetcher = new RankFetcher { CnAuthProvider = CnAuthProvider };
@@ -732,13 +566,13 @@ public sealed class MainViewModel : ObservableObject
             if (r.NoRank > 0) parts.Add($"{r.NoRank} 个未定级");
             if (r.CnSkipped > 0) parts.Add($"{r.CnSkipped} 个国服号未授权跳过");
             if (r.Failed > 0) parts.Add($"{r.Failed} 个查询失败");
-            StatusText = RankStatusText = string.Join(" · ", parts);
+            RankStatusText = string.Join(" · ", parts);
         }
         catch (Exception ex)
         {
-            StatusText = RankStatusText = "刷新段位失败:" + ex.Message;
+            RankStatusText = "刷新段位失败:" + ex.Message;
         }
-        finally { Busy = false; AutoClearRankStatus(); }
+        finally { RefreshingRanks = false; AutoClearRankStatus(); }
     }
 
     private int _rankStatusSeq;
@@ -748,7 +582,7 @@ public sealed class MainViewModel : ObservableObject
     {
         var seq = ++_rankStatusSeq;
         await Task.Delay(8000);
-        if (seq == _rankStatusSeq && !Busy) RankStatusText = "";
+        if (seq == _rankStatusSeq && !RefreshingRanks) RankStatusText = "";
     }
 
     // ---- 自动检测「战网里登了新号 / 换了号」(避免必须手点刷新或重启本工具)----

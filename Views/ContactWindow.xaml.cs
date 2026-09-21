@@ -1,27 +1,21 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Input;
 
 namespace BnetSwitch;
 
 public partial class ContactWindow : Window
 {
-    private readonly string _qqUrl;
-    private readonly string _githubUrl;
-
-    public ContactWindow(string qqUrl, string githubUrl)
-    {
-        InitializeComponent();
-        _qqUrl = qqUrl;
-        _githubUrl = githubUrl;
-    }
+    public ContactWindow() => InitializeComponent();
 
     private void OnDrag(object sender, MouseButtonEventArgs e)
     {
         if (e.ButtonState == MouseButtonState.Pressed) DragMove();
     }
 
-    private void OnQQ(object sender, MouseButtonEventArgs e) => BnetSwitch.Services.LinkOpener.Open(_qqUrl);
-    private void OnGithub(object sender, MouseButtonEventArgs e) => BnetSwitch.Services.LinkOpener.Open(_githubUrl);
+    private void OnFeedback(object sender, MouseButtonEventArgs e) =>
+        BnetSwitch.Services.LinkOpener.Open(BnetSwitch.ViewModels.MainViewModel.GithubUrl + "/issues");
+    private void OnGithub(object sender, MouseButtonEventArgs e) =>
+        BnetSwitch.Services.LinkOpener.Open(BnetSwitch.ViewModels.MainViewModel.GithubUrl);
 
     /// <summary>把日志和状态打成 zip 放桌面,并在资源管理器里选中它 —— 用户接着拖进群里就行。</summary>
     private void OnExportDiag(object sender, MouseButtonEventArgs e)
