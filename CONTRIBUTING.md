@@ -13,7 +13,7 @@
 
 ## 环境与 SDK 约束
 
-- **.NET 8 SDK**，目标框架 `net8.0-windows`（WPF + 少量 WinForms 托盘），唯一项目文件 `BnetSwitch.csproj`（仓库根目录，无 solution 文件）。
+- **.NET 8 SDK**，目标框架 `net8.0-windows`（WPF + 少量 WinForms 托盘），产品项目文件 `BnetSwitch.csproj`（仓库根目录，无 solution 文件）；回归测试工程 `tests/BnetSwitch.Tests/`（可移植 `net8.0`，仅 Linux/WSL 运行，见「测试约定」）。
 - WSL/Linux 侧 SDK 惯例安装在 `~/.dotnet/dotnet`（可能不在 PATH）。`build.sh` 自动探测，也可用 `DOTNET` 环境变量显式指定。
 - NuGet 还原需要能访问 nuget.org（或本地已有 `~/.nuget/packages` 缓存）。
 
@@ -23,7 +23,7 @@
 | --- | --- | --- |
 | `./build.sh build` / `publish`（交叉编译出 exe） | ✅ 需 `-p:EnableWindowsTargeting=true`（脚本已带） | ✅ 直接 `dotnet build` / `dotnet publish`，无需该参数 |
 | 运行 `BnetSwitch.exe`（GUI 与全部命令行参数） | ❌ WPF 只能在 Windows 运行 | ✅ 需 .NET 8 Desktop Runtime（框架依赖发布） |
-| `./build.sh test` / `validate` | ✅ | test 同理；`validation/*.sh` 依赖 XDG 目录隔离，**不要在 Windows 上跑** |
+| `./build.sh test` / `validate` | ✅ | ❌ 两者都依赖 XDG/TMPDIR 目录隔离，**不要在 Windows 上跑**（test 套件有守卫，非 Linux 如实报错返回 2） |
 | `build.ps1`（发布 + Inno Setup 打安装包） | ❌ | ✅ 需 Inno Setup 6 |
 
 **WSL 编译通过 ≠ Windows 验收通过**：GUI 行为、免密切换、注册表/进程相关逻辑必须在 Windows 实机验证；环境不具备时如实标记「未验证」，不得以编译成功冒充。
@@ -41,9 +41,21 @@ WSL/Linux 用仓库根目录的 `build.sh`（约定与退出码见脚本头部�
 ```
 
 - 退出码：`0` 成功；非 0 为对应步骤失败；`2` 为参数错误或未找到 .NET SDK。
-- **test 现状如实报告**：仓库当前没有测试项目，`./build.sh test` 会打印「无测试」并返回 0，**不会谎称测试通过**。自动化回归测试计划在阶段3（DIEM-140）引入；约定测试工程放 `tests/` 目录，放入后 `test` 子命令自动接入，无需改脚本。
+- **test 现状**：`./build.sh test` 运行 `tests/` 下的回归测试工程（零依赖控制台运行器，任一用例失败即非零退出；「失败→非零」契约本身有用例自检）。若 `tests/` 为空会如实打印「无测试」并返回 0，**不会谎称测试通过**。约定见下方「测试约定」。
 - `validate` 跑的是合成数据兼容性检查（如 `validation/local-compatibility.sh`），属验证脚本，不等同于单元测试套件。
 - Windows 安装包打包仍走 `build.ps1`（清理 → 发布 → 可选签名 → Inno Setup 打包），本脚本不重复实现。
+
+## 测试约定
+
+回归测试工程在 `tests/BnetSwitch.Tests/`（阶段3 / DIEM-140 引入），设计原则：
+
+- **零第三方测试框架**：运行器是自研的最小控制台断言（`TestRunner.cs`），全部通过退出 0、任一失败退出非 0。仓库约定新增依赖（含测试框架）需维护者同意；如将来迁移 xunit 等，先征得同意，用例本身是普通静态方法，迁移只需替换运行器。
+- **测的是真实产品逻辑**：测试工程用 `Compile Include` 直接链接 `Services/`、`Models/` 下的产品源文件（同一份实现既进 WPF 产物也进测试，不存在会漂移的第二套逻辑）；不 mock 产品核心判断和文件恢复逻辑。根 `BnetSwitch.csproj` 以 `Compile Remove="tests/**"` 反向排除测试目录，避免 WPF 默认递归收集把测试源码编进产品。
+- **数据隔离**：每个用例换全新临时沙箱 —— Linux 上 `XDG_DATA_HOME`/`XDG_CONFIG_HOME`/`TMPDIR` 重定向 `Environment.GetFolderPath` 与 `Path.GetTempPath`（同 `validation/*.sh` 的机制），产品代码的 `%LOCALAPPDATA%\BnetSwitch`、`%APPDATA%\Battle.net` 全部落进临时目录；沙箱自检失效即炸响，整轮结束对比个人目录指纹证明无副作用。**仅 WSL/Linux 可跑**（非 Linux 返回 2）。
+- **合成数据**：登录名一律 `example.invalid`，BattleTag/令牌字节全部编造；真实账号、令牌绝不进测试（见「数据与凭据安全约定」）。注意 Microsoft.Data.Sqlite 默认连接池会握住已删文件的 inode，沙箱 `Reset` 时统一 `ClearAllPools()`。
+- **覆盖范围（当前）**：令牌槽变化判定（`TokenStore.ChangedSince`/LastSeen 持久化）、配置账号/区服解析（`AccountReader.ResolveCurrentAccountFromConfig` 及合成库读取）、快照文件存取/还原成败边界（`AppDataStore`）、切号事务失败恢复与活跃指针写回（`SwitchJournal`/`WriteActivePointer`）。部分用例是「现行为记录」（注释里标明），钉住历史行为供阶段4重构对照，不代表该行为是理想设计。
+- **不覆盖 / 需 Windows 实机**：注册表真实读写、进程控制（`BattleNetController`）、WPF UI、真实免密切换。测试里只验证注册表边界在非 Windows 平台安全退化（`TokenStore.ReadAll` 空字典 / `Write` false / 不抛）。
+- **加用例**：新建或续写 `tests/BnetSwitch.Tests/` 下的 `*Tests.cs`（一个领域一个静态类，内部 `T.Test(...)`），在 `Program.cs` 注册 `Run()`；跑 `./build.sh test` 验证。
 
 ## 模块导航
 
@@ -77,6 +89,7 @@ Stats/                     战绩窗口族:StatsWindow、CareerWindow、Billboar
                            与 StatsService/CareerService/StatsModels;Stats/Theme 为战绩窗独立样式
 Themes/                    主窗口亮/暗资源字典(Palette.Light/Dark、Controls、Icons)
 validation/                合成数据兼容性检查脚本(Linux 可跑,mktemp + XDG 隔离)
+tests/BnetSwitch.Tests/    核心回归测试(零依赖控制台运行器,链接产品源码,XDG 沙箱 + 合成数据,约定见「测试约定」)
 docs/                      验证报告等文档
 installer/                 Inno Setup 脚本(Windows 打包用)
 build.sh / build.ps1       WSL 一键构建验证 / Windows 安装包打包
@@ -97,7 +110,7 @@ build.sh / build.ps1       WSL 一键构建验证 / Windows 安装包打包
 ## 数据与凭据安全约定
 
 - 真实账号、令牌、手机号、战网 Tag、邮箱**一律不得**写入仓库、测试、日志、CI 或 issue 评论。
-- 自动化测试/验证只用临时目录 + 合成数据，范例见 `validation/local-compatibility.sh`：mktemp 目录、XDG 变量重定向真实路径 API、合成域名用 `example.invalid`；不读真实令牌、不控制进程、不写注册表。
+- 自动化测试/验证只用临时目录 + 合成数据，范例见 `tests/BnetSwitch.Tests/Sandbox.cs` 与 `validation/local-compatibility.sh`：mktemp 目录、XDG 变量重定向真实路径 API、合成域名用 `example.invalid`；不读真实令牌、不控制进程、不写注册表。
 - 注册表与进程控制逻辑只能通过隔离边界测试，合成测试通过也不代表 Windows 实机行为，两者分开记录。
 - 抓包文件（`*.har`、`*.saz`、`*.pcap*`）与私钥（`*.pfx`）已在 `.gitignore` 全量拦截，不要绕过。
 
