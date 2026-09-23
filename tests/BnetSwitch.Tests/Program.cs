@@ -34,6 +34,7 @@ public static class Program
         {
             TokenSlotTests.Run();
             AccountResolveTests.Run();
+            SnapshotRestoreTests.Run();
             RunnerContractTests.Run();
             T.Test("无副作用: 个人数据目录运行前后完好", Sandbox.VerifyNoPersonalSideEffects);
         }
