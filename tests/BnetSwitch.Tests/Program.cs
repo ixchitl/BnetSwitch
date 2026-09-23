@@ -33,6 +33,7 @@ public static class Program
         try
         {
             TokenSlotTests.Run();
+            AccountResolveTests.Run();
             RunnerContractTests.Run();
             T.Test("无副作用: 个人数据目录运行前后完好", Sandbox.VerifyNoPersonalSideEffects);
         }

@@ -1,3 +1,5 @@
+using Microsoft.Data.Sqlite;
+
 namespace BnetSwitch.Tests;
 
 /// <summary>
@@ -41,6 +43,10 @@ public static class Sandbox
     public static void Reset()
     {
         if (Root.Length == 0) { Install(); return; }
+        // Microsoft.Data.Sqlite 默认按连接字符串池化连接:上一个用例的池化句柄仍握着
+        // 已删除文件的 inode,同路径重开时会拿到旧库(实测 CREATE TABLE 撞「already exists」)。
+        // 换沙箱必须连池一起清,产品代码里的真实连接同样受益。
+        SqliteConnection.ClearAllPools();
         foreach (var dir in new[] { DataDir, ConfigDir, TmpDir })
         {
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
