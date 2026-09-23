@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 核心回归测试:零依赖控制台运行器(不引 xunit 等测试框架 —— 仓库约定新增依赖
+       含测试框架需维护者同意,见 CONTRIBUTING.md;用例是普通静态方法,将来迁移只换运行器)。
+       net8.0 可移植目标,在 WSL/Linux 上跑;Windows 专用适配(注册表/进程/WPF)不在此套件内。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>BnetSwitch.Tests</RootNamespace>
+    <!-- 链接的产品源含注册表调用(仅 Windows 受支持)。测试宿主按 net8.0 编译,
+         「非 Windows 平台注册表边界必须惰性」本身就是被覆盖的行为(见 TokenSlotTests),
+         故屏蔽平台兼容警告;产品工程仍是 net8.0-windows,不受影响。 -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 直接链接产品源码而非复制:同一份实现既进 WPF 产物也进测试,不存在会漂移的第二套逻辑。
+         根目录 BnetSwitch.csproj 以 Compile Remove="tests/**" 反向排除本目录。 -->
+    <Compile Include="../../Models/BattleAccount.cs" />
+    <Compile Include="../../Services/BattleNetPaths.cs" />
+    <Compile Include="../../Services/AccountReader.cs" />
+    <Compile Include="../../Services/AppDataStore.cs" />
+    <Compile Include="../../Services/TokenStore.cs" />
+    <Compile Include="../../Services/SwitchJournal.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 与生产同版本的既有依赖(AccountReader 读合成 CachedData.db 用),非新增第三方包。 -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.7" />
+  </ItemGroup>
+
+</Project>
