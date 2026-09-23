@@ -4,7 +4,7 @@
 # 用法: ./build.sh [命令]
 #   all       (默认) 依次执行 build → test → validate
 #   build     交叉编译 Windows 目标(Debug),产物在 bin/Debug/net8.0-windows/
-#   test      运行 tests/ 下的测试项目;当前没有测试项目时如实报告,不算通过
+#   test      运行 tests/ 下的测试工程(零依赖控制台运行器,任一用例失败即非零退出;仅 WSL/Linux)
 #   validate  运行 validation/*.sh 合成兼容性检查(合成数据,不是单元测试)
 #   publish   清空输出目录后产出 Release win-x64 框架依赖发布物,到 publish/local-only/
 #
@@ -54,17 +54,21 @@ cmd_publish() {
 }
 
 cmd_test() {
-    echo "== test: 运行测试项目 =="
+    echo "== test: 运行 tests/ 下的测试工程 (临时沙箱 + 合成数据,不碰真实战网数据) =="
     shopt -s nullglob
-    local projects=(tests/*.csproj)
+    local projects=(tests/*.csproj tests/*/*.csproj)
     shopt -u nullglob
     if [ ${#projects[@]} -eq 0 ]; then
-        # 如实报告: 没有测试 ≠ 测试通过。后续测试项目放进 tests/ 即被本命令自动接入。
-        echo "tests/ 下未找到测试项目 —— 当前状态为「无测试」,不是「测试通过」。"
-        echo "自动化回归测试计划在阶段3 (DIEM-140) 引入,届时本项目约定测试工程放 tests/ 目录。"
+        # 如实报告: 没有测试 ≠ 测试通过。测试工程放进 tests/(或其一级子目录)即被本命令自动接入。
+        echo "tests/ 下未找到测试工程 —— 当前状态为「无测试」,不是「测试通过」。"
         return 0
     fi
-    "$dotnet_bin" test "${projects[@]}" --nologo "${win_targeting[@]}"
+    # 测试工程是 net8.0 可移植目标(控制台运行器),Linux 上原生执行,不需要 win targeting;
+    # 运行器约定: 全部通过退出 0,任一失败退出非 0(契约由 RunnerContractTests 自检)。
+    local p
+    for p in "${projects[@]}"; do
+        "$dotnet_bin" run --project "$p" --nologo
+    done
 }
 
 cmd_validate() {

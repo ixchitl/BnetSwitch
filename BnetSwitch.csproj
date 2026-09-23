@@ -29,6 +29,13 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.7" />
   </ItemGroup>
 
+  <!-- tests/ 是独立的测试工程(默认递归收集会把测试源码及其 obj 生成物编进产品,已实测炸 CS0579),
+       产品编译必须整体排除;测试工程反过来用 Compile Include 链接所需的产品源文件。 -->
+  <ItemGroup>
+    <Compile Remove="tests/**" />
+    <None Remove="tests/**" />
+  </ItemGroup>
+
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
   </ItemGroup>
