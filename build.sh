@@ -67,7 +67,8 @@ cmd_test() {
     # 运行器约定: 全部通过退出 0,任一失败退出非 0(契约由 RunnerContractTests 自检)。
     local p
     for p in "${projects[@]}"; do
-        "$dotnet_bin" run --project "$p" --nologo
+        # 显式传播失败(不只依赖 set -e): 任一测试工程失败,验证入口必须非零退出
+        "$dotnet_bin" run --project "$p" --nologo || return 1
     done
 }
 

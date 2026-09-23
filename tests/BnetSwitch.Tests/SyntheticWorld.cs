@@ -90,6 +90,9 @@ public static class SyntheticWorld
     public static string Pointer(long accountId, string region = "CN") =>
         $"{{\"account_id\":{accountId},\"account_region\":\"{region}\"}}";
 
+    /// <summary>合成令牌/槽值字节(数值全部编造,与真实 DPAPI 数据无关)。</summary>
+    public static byte[] Bytes(params int[] v) => v.Select(x => (byte)x).ToArray();
+
     /// <summary>
     /// FNV-1a-64,小写十六进制 —— 与 login_cache.name 同口径(输入先转大写)。
     /// 这是【造合成数据】用的独立实现,正确性由公开测试向量用例核对(见 AccountResolveTests),

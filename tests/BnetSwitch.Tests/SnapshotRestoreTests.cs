@@ -14,7 +14,6 @@ public static class SnapshotRestoreTests
     private const long IdB = 43;
     private const string SlotA = "4EB0C645";
 
-    private static byte[] B(params int[] v) => v.Select(x => (byte)x).ToArray();
 
     public static void Run()
     {
@@ -131,16 +130,16 @@ public static class SnapshotRestoreTests
         T.Test("快照: 令牌槽存取回环,槽名大小写不敏感", () =>
         {
             var (p, store) = NewStore();
-            store.SaveTokens(IdA, new Dictionary<string, byte[]> { [SlotA] = B(1, 2, 3) });
+            store.SaveTokens(IdA, new Dictionary<string, byte[]> { [SlotA] = Bytes(1, 2, 3) });
             var tokens = store.ReadTokens(IdA);
             T.Equal(1, tokens.Count, "令牌槽数");
-            T.EqualBytes(B(1, 2, 3), tokens[SlotA.ToLowerInvariant()], "小写槽名也应读到(OrdinalIgnoreCase)");
+            T.EqualBytes(Bytes(1, 2, 3), tokens[SlotA.ToLowerInvariant()], "小写槽名也应读到(OrdinalIgnoreCase)");
         });
 
         T.Test("快照: 空令牌字典不落盘,保留旧值", () =>
         {
             var (p, store) = NewStore();
-            store.SaveTokens(IdA, new Dictionary<string, byte[]> { [SlotA] = B(1) });
+            store.SaveTokens(IdA, new Dictionary<string, byte[]> { [SlotA] = Bytes(1) });
             store.SaveTokens(IdA, new Dictionary<string, byte[]>());
             T.Equal(1, store.ReadTokens(IdA).Count, "空存不应抹掉旧令牌快照");
         });
@@ -157,17 +156,17 @@ public static class SnapshotRestoreTests
         {
             var (p, store) = NewStore();
             // 旧快照存旧值,新快照存新值 —— 写回应取【最新】那份(目标号自己的可能是过期的)
-            store.SaveTokens(IdA, new Dictionary<string, byte[]> { [SlotA] = B(1) });
+            store.SaveTokens(IdA, new Dictionary<string, byte[]> { [SlotA] = Bytes(1) });
             var fileA = Path.Combine(store.Root, IdA.ToString(), "uauth.json");
             File.SetLastWriteTimeUtc(fileA, DateTime.UtcNow.AddHours(-2));
-            store.SaveTokens(IdB, new Dictionary<string, byte[]> { [SlotA] = B(9) });
+            store.SaveTokens(IdB, new Dictionary<string, byte[]> { [SlotA] = Bytes(9) });
 
             // 再造一个更新的损坏文件:应被跳过而不是让整次查找失败
             var dirC = Path.Combine(store.Root, "44");
             Directory.CreateDirectory(dirC);
             File.WriteAllText(Path.Combine(dirC, "uauth.json"), "{broken");
 
-            T.EqualBytes(B(9), store.FindNewestToken(SlotA), "应取最新的有效令牌");
+            T.EqualBytes(Bytes(9), store.FindNewestToken(SlotA), "应取最新的有效令牌");
             T.Null(store.FindNewestToken("FFFFFFFF"), "没有该槽应返回 null");
         });
 
